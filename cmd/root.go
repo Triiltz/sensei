@@ -15,8 +15,9 @@ import (
 )
 
 var (
-	forceFlag bool
-	openFlag  bool
+	forceFlag  bool
+	openAIFlag bool
+	geminiFlag bool
 )
 
 var rootCmd = &cobra.Command{
@@ -28,7 +29,8 @@ Examples:
   sensei "how to untar a tar.gz?"
   cat script.sh | sensei "what does this do?"
   sensei -f "create a new git branch called feature/login"
-  sensei -o`,
+  sensei -o    (open ChatGPT in browser)
+  sensei -g    (open Gemini in browser)`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE:          run,
@@ -36,7 +38,8 @@ Examples:
 
 func init() {
 	rootCmd.Flags().BoolVarP(&forceFlag, "force", "f", false, "Execute the suggested command without confirmation")
-	rootCmd.Flags().BoolVarP(&openFlag, "open", "o", false, "Open AI chat in the default browser")
+	rootCmd.Flags().BoolVarP(&openAIFlag, "openai", "o", false, "Open ChatGPT in the default browser")
+	rootCmd.Flags().BoolVarP(&geminiFlag, "gemini", "g", false, "Open Google Gemini in the default browser")
 }
 
 // Execute is called by main.go to start the CLI.
@@ -48,9 +51,12 @@ func Execute() {
 }
 
 func run(cmd *cobra.Command, args []string) error {
-	// --open flag: open the browser and exit.
-	if openFlag {
+	// Browser flags: open provider UI and exit.
+	if openAIFlag {
 		return openBrowser("https://chat.openai.com")
+	}
+	if geminiFlag {
+		return openBrowser("https://gemini.google.com")
 	}
 
 	// Read piped content if available.

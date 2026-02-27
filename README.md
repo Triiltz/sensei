@@ -137,7 +137,8 @@ In this mode, SENSEI automatically switches behavior: instead of being concise, 
 | Flag | Short | Description |
 |------|:-----:|-----------|
 | `--force` | `-f` | Execute the suggested command automatically, skipping confirmation |
-| `--open` | `-o` | Open ChatGPT in the default browser |
+| `--openai` | `-o` | Open ChatGPT in the default browser |
+| `--gemini` | `-g` | Open Google Gemini in the default browser |
 | `--help` | `-h` | Show help |
 
 ```bash
@@ -146,6 +147,9 @@ sensei -f "list all open ports"
 
 # Open ChatGPT in the browser:
 sensei -o
+
+# Open Gemini in the browser:
+sensei -g
 ```
 
 ---

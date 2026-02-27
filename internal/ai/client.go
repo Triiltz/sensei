@@ -58,10 +58,17 @@ func NewClient(cfg *config.Config) *Client {
 	}
 }
 
+// maxPipeContentLen is the maximum number of characters allowed from piped input.
+// Content beyond this limit is truncated to avoid exceeding model token limits.
+const maxPipeContentLen = 100_000
+
 // Ask sends the user prompt (with optional piped context) to the AI and returns the response text.
 func (c *Client) Ask(userPrompt string, pipeContent string) (string, error) {
 	systemPrompt := TerminalSystemPrompt
 	if pipeContent != "" {
+		if len(pipeContent) > maxPipeContentLen {
+			pipeContent = pipeContent[:maxPipeContentLen] + "\n\n[... content truncated due to size limit ...]"
+		}
 		systemPrompt = PipeSystemPrompt
 		userPrompt = fmt.Sprintf("Content received via pipe:\n```\n%s\n```\n\nUser question: %s", pipeContent, userPrompt)
 	}
@@ -112,12 +119,12 @@ func (c *Client) askOpenAI(systemPrompt, userPrompt string) (string, error) {
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
+		return "", fmt.Errorf("openai: failed to marshal request: %w", err)
 	}
 
 	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
+		return "", fmt.Errorf("openai: failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -125,26 +132,26 @@ func (c *Client) askOpenAI(systemPrompt, userPrompt string) (string, error) {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("request failed: %w", err)
+		return "", fmt.Errorf("openai: request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
+		return "", fmt.Errorf("openai: failed to read response: %w", err)
 	}
 
 	var result openAIResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", fmt.Errorf("failed to parse response: %w", err)
+		return "", fmt.Errorf("openai: failed to parse response: %w", err)
 	}
 
 	if result.Error != nil {
-		return "", fmt.Errorf("API error: %s", result.Error.Message)
+		return "", fmt.Errorf("openai: API error: %s", result.Error.Message)
 	}
 
 	if len(result.Choices) == 0 {
-		return "", fmt.Errorf("empty response from API")
+		return "", fmt.Errorf("openai: empty response from API")
 	}
 
 	return strings.TrimSpace(result.Choices[0].Message.Content), nil
@@ -192,43 +199,44 @@ func (c *Client) askGemini(systemPrompt, userPrompt string) (string, error) {
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
+		return "", fmt.Errorf("gemini: failed to marshal request: %w", err)
 	}
 
 	url := fmt.Sprintf(
-		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
-		c.cfg.Model, c.cfg.APIKey,
+		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent",
+		c.cfg.Model,
 	)
 
 	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
+		return "", fmt.Errorf("gemini: failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", c.cfg.APIKey)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("request failed: %w", err)
+		return "", fmt.Errorf("gemini: request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
+		return "", fmt.Errorf("gemini: failed to read response: %w", err)
 	}
 
 	var result geminiResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", fmt.Errorf("failed to parse response: %w", err)
+		return "", fmt.Errorf("gemini: failed to parse response: %w", err)
 	}
 
 	if result.Error != nil {
-		return "", fmt.Errorf("API error: %s", result.Error.Message)
+		return "", fmt.Errorf("gemini: API error: %s", result.Error.Message)
 	}
 
 	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("empty response from API")
+		return "", fmt.Errorf("gemini: empty response from API")
 	}
 
 	return strings.TrimSpace(result.Candidates[0].Content.Parts[0].Text), nil
