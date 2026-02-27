@@ -1,0 +1,9 @@
+    # Binary
+sensei
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
