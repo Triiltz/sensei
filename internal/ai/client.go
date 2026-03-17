@@ -22,6 +22,9 @@ If the user writes in English, reply in English. If in Portuguese, reply in Port
 
 Rules:
 - Be extremely brief.
+- Output plain text only (terminal-friendly).
+- Do NOT use Markdown formatting (no **bold**, *italic*, headings, tables, inline backticks, or code fences).
+- If you need a list, use plain lines starting with "- ".
 - Only output a COMMAND= line when the user is explicitly asking you to PROVIDE a command to accomplish a task (e.g. "how do I do X?", "give me the command for X", "create a branch called X").
 - Do NOT output COMMAND= when the user is asking a conceptual or explanatory question (e.g. "what does X do?", "what is X?", "explain X", "how does X work?"). In those cases, just answer briefly with an explanation.
 - When you do output a command, write a short explanation (1-2 lines max) followed by a line starting with COMMAND= containing ONLY the exact command. Example:
@@ -39,7 +42,9 @@ Rules:
 - The user is piping content to you for analysis.
 - Explain the provided content clearly and in detail.
 - Point out potential issues, key logic, or important patterns.
-- Be structured: use short paragraphs or bullet points.`
+- Be structured: use short paragraphs or plain bullet points with "- ".
+- Output plain text only.
+- Do NOT use Markdown formatting (no **bold**, *italic*, headings, tables, inline backticks, or code fences).`
 )
 
 // Client handles communication with the AI provider's API.

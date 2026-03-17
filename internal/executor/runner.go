@@ -5,7 +5,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
+)
+
+var (
+	boldAsteriskRE   = regexp.MustCompile(`\*\*(.*?)\*\*`)
+	boldUnderscoreRE = regexp.MustCompile(`__(.*?)__`)
 )
 
 // ParseCommand checks if the AI response contains a COMMAND= line and returns
@@ -30,6 +36,7 @@ func ParseCommand(response string) (text string, command string) {
 // execution (unless force is true).
 func Run(response string, force bool) error {
 	text, command := ParseCommand(response)
+	text = normalizePlainText(text)
 
 	// Always print the explanation text.
 	if text != "" {
@@ -57,6 +64,51 @@ func Run(response string, force bool) error {
 
 	fmt.Println()
 	return execute(command)
+}
+
+// normalizePlainText removes common Markdown markers so output stays terminal-friendly.
+func normalizePlainText(text string) string {
+	if text == "" {
+		return text
+	}
+
+	lines := strings.Split(text, "\n")
+	inCodeFence := false
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			inCodeFence = !inCodeFence
+			lines[i] = ""
+			continue
+		}
+
+		if inCodeFence {
+			continue
+		}
+
+		leading := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+		content := strings.TrimLeft(line, " \t")
+
+		for strings.HasPrefix(content, "#") {
+			content = strings.TrimLeft(strings.TrimPrefix(content, "#"), " ")
+		}
+
+		if strings.HasPrefix(content, "* ") || strings.HasPrefix(content, "+ ") {
+			content = "- " + strings.TrimSpace(content[2:])
+		}
+
+		content = boldAsteriskRE.ReplaceAllString(content, "$1")
+		content = boldUnderscoreRE.ReplaceAllString(content, "$1")
+		content = strings.ReplaceAll(content, "`", "")
+
+		lines[i] = leading + content
+	}
+
+	clean := strings.Join(lines, "\n")
+	clean = strings.TrimSpace(clean)
+
+	return clean
 }
 
 // execute runs the command through the user's shell and streams output.
