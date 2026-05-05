@@ -7,7 +7,9 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
+	"github.com/briandowns/spinner"
 	"github.com/spf13/cobra"
 	"github.com/triiltz/sensei/internal/ai"
 	"github.com/triiltz/sensei/internal/config"
@@ -82,7 +84,14 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Call the AI.
 	client := ai.NewClient(cfg)
+
+	s := spinner.New(spinner.CharSets[11], 80*time.Millisecond)
+	s.Suffix = " Thinking..."
+	s.Start()
+
 	response, err := client.Ask(userPrompt, pipeContent)
+	s.Stop()
+
 	if err != nil {
 		return fmt.Errorf("AI request failed: %w", err)
 	}
