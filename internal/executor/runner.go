@@ -12,6 +12,7 @@ import (
 var (
 	boldAsteriskRE   = regexp.MustCompile(`\*\*(.*?)\*\*`)
 	boldUnderscoreRE = regexp.MustCompile(`__(.*?)__`)
+	placeholderRE    = regexp.MustCompile(`<[^>]+>`)
 )
 
 // ParseCommand checks if the AI response contains a COMMAND= line and returns
@@ -33,7 +34,7 @@ func ParseCommand(response string) (text string, command string) {
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "COMMAND=") {
-			if len(commands) == 1 {
+			if len(commands) == 1 && !placeholderRE.MatchString(commands[0]) {
 				command = commands[0] // Extract to execute
 			} else {
 				// If multiple, show them as text and avoid execution
