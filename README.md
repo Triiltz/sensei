@@ -23,7 +23,7 @@ The binary will be installed to `~/go/bin/`. Make sure this directory is in your
 export PATH="$HOME/go/bin:$PATH"
 ```
 
-### Manual build
+### Manual build (and local updates)
 
 ```bash
 git clone https://github.com/triiltz/sensei.git
@@ -31,6 +31,8 @@ cd sensei
 go build -o sensei .
 sudo mv sensei /usr/local/bin/   # optional, for global access
 ```
+
+**Tip for developers:** If you make changes to the source code locally, simply run `go install .` inside the project folder. This will recompile and immediately update the binary in your `~/go/bin/` folder, making the changes instantly available to the `sensei` command.
 
 ---
 

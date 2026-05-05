@@ -18,11 +18,28 @@ var (
 // the response text (without the command line) and the extracted command.
 func ParseCommand(response string) (text string, command string) {
 	var textLines []string
+	var commands []string
+	lines := strings.Split(response, "\n")
 
-	for _, line := range strings.Split(response, "\n") {
+	// First pass: count how many commands there are
+	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "COMMAND=") {
-			command = strings.TrimPrefix(trimmed, "COMMAND=")
+			commands = append(commands, strings.TrimPrefix(trimmed, "COMMAND="))
+		}
+	}
+
+	// Second pass: build the text and extract the command (if only one)
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "COMMAND=") {
+			if len(commands) == 1 {
+				command = commands[0] // Extract to execute
+			} else {
+				// If multiple, show them as text and avoid execution
+				cmd := strings.TrimPrefix(trimmed, "COMMAND=")
+				textLines = append(textLines, "  $ "+cmd)
+			}
 		} else {
 			textLines = append(textLines, line)
 		}
