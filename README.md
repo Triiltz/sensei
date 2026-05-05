@@ -118,7 +118,7 @@ SENSEI responds concisely and, when applicable, suggests the exact command with 
 ```
 Extracts a tar.gz archive.
 
-💡 Suggested command: tar -xzf archive.tar.gz
+   Suggested command: tar -xzf archive.tar.gz
    Run it? [y/N]:
 ```
 
