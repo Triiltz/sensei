@@ -51,7 +51,7 @@ Examples:
 }
 
 func init() {
-	rootCmd.Flags().BoolVarP(&forceFlag, "force", "f", false, "Execute the suggested command without confirmation")
+	rootCmd.Flags().BoolVarP(&forceFlag, "force", "f", false, "Run without asking (dangerous commands and reads of secrets still ask)")
 	rootCmd.Flags().BoolVarP(&agentFlag, "agent", "a", false, "Agent mode: run commands step by step until the question is answered")
 	rootCmd.Flags().BoolVar(&verboseFlag, "verbose", false, "In agent mode, also print each command's output")
 	rootCmd.Flags().BoolVarP(&openAIFlag, "openai", "o", false, "Open ChatGPT in the default browser")

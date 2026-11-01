@@ -31,6 +31,15 @@ func TestRetry(t *testing.T) {
 			wantCalls: 2,
 		},
 		{
+			name: "Gemini's RetryInfo in the body is honoured when there is no header",
+			resps: []fakeResp{
+				{status: 429, body: `{"error":{"code":429,"message":"Quota exceeded","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"27.149s"}]}}`},
+				ok(openAIText),
+			},
+			wantWaits: []time.Duration{28 * time.Second},
+			wantCalls: 2,
+		},
+		{
 			name: "5xx backs off exponentially",
 			resps: []fakeResp{
 				{status: 503, body: "busy"},

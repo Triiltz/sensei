@@ -20,8 +20,9 @@ func setup(t *testing.T, ttyInput string, ttyErr error) *fakeTTY {
 	t.Helper()
 	f := &fakeTTY{}
 
-	oldStdout, oldTTY, oldShell := stdout, openTTY, runShell
-	t.Cleanup(func() { stdout, openTTY, runShell = oldStdout, oldTTY, oldShell })
+	oldStdout, oldTTY, oldShell, oldColor := stdout, openTTY, runShell, colorOutput
+	t.Cleanup(func() { stdout, openTTY, runShell, colorOutput = oldStdout, oldTTY, oldShell, oldColor })
+	colorOutput = func() bool { return false }
 
 	stdout = &f.out
 	openTTY = func() (io.ReadCloser, error) {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/triiltz/sensei/internal/executor"
 	"github.com/triiltz/sensei/internal/llm"
+	"github.com/triiltz/sensei/internal/policy"
 )
 
 // declinedOutput is the tool result sent when the user says no.
@@ -21,7 +22,7 @@ type Config struct {
 	Provider   llm.Provider
 	MaxSteps   int
 	CmdTimeout time.Duration
-	Force      bool // run commands without asking
+	Force      bool // skip confirmation for the confirm tier (never for dangerous or sensitive)
 	Verbose    bool // also print command output
 
 	// Out receives the final answer; Log receives progress and prompts, so
@@ -29,8 +30,9 @@ type Config struct {
 	Out, Log io.Writer
 	Color    bool // dim the progress lines
 
-	// Hooks; nil means the real implementation.
-	Approve  func(ctx context.Context, cmd RunCommandArgs) (bool, error)
+	// Hooks; nil means the real implementation. Approve is only called for
+	// commands that need it (see policy.Decision.NeedsConfirmation).
+	Approve  func(ctx context.Context, cmd RunCommandArgs, d policy.Decision) (bool, error)
 	Exec     func(ctx context.Context, command string, timeout time.Duration) (executor.Result, error)
 	Thinking func() (stop func()) // shown while waiting for the model
 }
@@ -39,6 +41,7 @@ type Config struct {
 type Call struct {
 	Command  string
 	Reason   string
+	Tier     policy.Tier
 	Approved bool
 	ExitCode int
 	TimedOut bool
@@ -80,7 +83,10 @@ func (r *runner) defaults() {
 		c.Log = os.Stderr
 	}
 	if c.Approve == nil {
-		c.Approve = func(ctx context.Context, _ RunCommandArgs) (bool, error) {
+		c.Approve = func(ctx context.Context, _ RunCommandArgs, d policy.Decision) (bool, error) {
+			if d.Tier == policy.Dangerous {
+				fmt.Fprintln(c.Log, executor.Warning(d, c.Color))
+			}
 			return executor.Confirm(ctx, c.Log, "  Run it? [y/N]: ")
 		}
 	}
@@ -167,15 +173,16 @@ func (r *runner) handle(ctx context.Context, tc llm.ToolCall) (string, error) {
 		return "Error: " + err.Error(), nil
 	}
 
-	call := Call{Command: args.Command, Reason: args.Reason}
+	decision := policy.Classify(args.Command)
+	call := Call{Command: args.Command, Reason: args.Reason, Tier: decision.Tier}
 	if args.Reason != "" {
 		r.logf("%s\n", r.dim("→ "+args.Reason))
 	}
 	r.logf("%s\n", r.dim("  $ "+args.Command))
 
-	approved := r.cfg.Force
+	approved := !decision.NeedsConfirmation(r.cfg.Force)
 	if !approved {
-		approved, err = r.cfg.Approve(ctx, args)
+		approved, err = r.cfg.Approve(ctx, args, decision)
 		if err != nil {
 			return "", err
 		}

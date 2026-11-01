@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+
+	"github.com/triiltz/sensei/internal/policy"
 )
 
 var (
@@ -41,7 +43,8 @@ type Command struct {
 }
 
 // Run prints the model's answer and, when it suggested exactly one runnable
-// command, asks for confirmation (unless force is true) and runs it.
+// command, asks for confirmation and runs it. force skips the question,
+// except for dangerous commands and those that may expose secrets.
 //
 // Several commands, or a command with placeholders, are shown but never run:
 // there is no single safe thing to confirm.
@@ -67,7 +70,14 @@ func Run(ctx context.Context, text string, cmds []Command, force bool) error {
 	command := cmds[0].Command
 	fmt.Fprintf(stdout, "\nSuggested command: %s\n", command)
 
-	if !force {
+	// One-shot mode always asks, as before; -f skips the question only
+	// where the policy allows it.
+	decision := policy.Classify(command)
+	if decision.Tier == policy.Dangerous {
+		fmt.Fprintln(stdout, Warning(decision, colorOutput()))
+	}
+
+	if !force || decision.NeedsConfirmation(true) {
 		ok, err := Confirm(ctx, stdout, "   Run it? [y/N]: ")
 		if err != nil {
 			return err
@@ -79,6 +89,21 @@ func Run(ctx context.Context, text string, cmds []Command, force bool) error {
 
 	fmt.Fprintln(stdout)
 	return runShell(ctx, command)
+}
+
+// Warning renders the notice shown before a dangerous command.
+func Warning(d policy.Decision, color bool) string {
+	msg := "   ⚠ Dangerous: " + d.Reason
+	if color {
+		return "\x1b[1;31m" + msg + "\x1b[0m"
+	}
+	return msg
+}
+
+// colorOutput reports whether stdout is a terminal that can show colours.
+var colorOutput = func() bool {
+	info, err := os.Stdout.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 // Confirm writes prompt to w, reads a yes/no answer from the terminal and

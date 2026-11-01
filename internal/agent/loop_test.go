@@ -10,6 +10,7 @@ import (
 
 	"github.com/triiltz/sensei/internal/executor"
 	"github.com/triiltz/sensei/internal/llm"
+	"github.com/triiltz/sensei/internal/policy"
 )
 
 // scripted replays a fixed sequence of responses (or errors) and records
@@ -70,7 +71,7 @@ func newHarness(steps ...step) *harness {
 		CmdTimeout: 30 * time.Second,
 		Out:        &h.out,
 		Log:        &h.log,
-		Approve: func(_ context.Context, c RunCommandArgs) (bool, error) {
+		Approve: func(_ context.Context, c RunCommandArgs, _ policy.Decision) (bool, error) {
 			h.asked = append(h.asked, c.Command)
 			return true, nil
 		},
@@ -186,7 +187,7 @@ func TestLoopUserDeclines(t *testing.T) {
 		toolTurn("", runCmd("c1", "rm -rf build")),
 		answerTurn("Without deleting build/ I can't confirm the fix."),
 	)
-	h.cfg.Approve = func(_ context.Context, c RunCommandArgs) (bool, error) { return false, nil }
+	h.cfg.Approve = func(context.Context, RunCommandArgs, policy.Decision) (bool, error) { return false, nil }
 
 	res, err := h.run(t)
 	if err != nil {
@@ -203,15 +204,48 @@ func TestLoopUserDeclines(t *testing.T) {
 	}
 }
 
-func TestLoopForceSkipsConfirmation(t *testing.T) {
-	h := newHarness(toolTurn("", runCmd("c1", "ls")), answerTurn("done"))
-	h.cfg.Force = true
-
-	if _, err := h.run(t); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestLoopPolicyTiers(t *testing.T) {
+	tests := []struct {
+		name      string
+		command   string
+		force     bool
+		wantAsked bool
+		wantTier  policy.Tier
+	}{
+		{name: "safe runs without asking", command: "ls -la", wantTier: policy.Safe},
+		{name: "confirm asks", command: "npm test", wantAsked: true, wantTier: policy.Confirm},
+		{name: "force skips confirm", command: "npm test", force: true, wantTier: policy.Confirm},
+		{name: "sensitive read asks", command: "cat .env", wantAsked: true, wantTier: policy.Confirm},
+		{name: "force never bypasses a sensitive read", command: "cat .env", force: true, wantAsked: true, wantTier: policy.Confirm},
+		{name: "dangerous asks", command: "rm -rf build", wantAsked: true, wantTier: policy.Dangerous},
+		{name: "force never bypasses dangerous", command: "rm -rf build", force: true, wantAsked: true, wantTier: policy.Dangerous},
 	}
-	if len(h.asked) != 0 || len(h.executed) != 1 {
-		t.Errorf("asked=%v executed=%v", h.asked, h.executed)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(toolTurn("", runCmd("c1", tt.command)), answerTurn("done"))
+			h.cfg.Force = tt.force
+			var gotDecision policy.Decision
+			h.cfg.Approve = func(_ context.Context, c RunCommandArgs, d policy.Decision) (bool, error) {
+				h.asked = append(h.asked, c.Command)
+				gotDecision = d
+				return true, nil
+			}
+
+			res, err := h.run(t)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if asked := len(h.asked) > 0; asked != tt.wantAsked {
+				t.Errorf("asked = %v, want %v", asked, tt.wantAsked)
+			}
+			if tt.wantAsked && gotDecision.Tier != tt.wantTier {
+				t.Errorf("Approve got tier %s, want %s", gotDecision.Tier, tt.wantTier)
+			}
+			if res.Calls[0].Tier != tt.wantTier {
+				t.Errorf("recorded tier = %s, want %s", res.Calls[0].Tier, tt.wantTier)
+			}
+		})
 	}
 }
 
@@ -292,8 +326,8 @@ func TestLoopMultipleToolCallsInOneResponse(t *testing.T) {
 }
 
 func TestLoopCancelledDuringConfirmation(t *testing.T) {
-	h := newHarness(toolTurn("", runCmd("c1", "ls")), answerTurn("never"))
-	h.cfg.Approve = func(context.Context, RunCommandArgs) (bool, error) { return false, context.Canceled }
+	h := newHarness(toolTurn("", runCmd("c1", "npm test")), answerTurn("never"))
+	h.cfg.Approve = func(context.Context, RunCommandArgs, policy.Decision) (bool, error) { return false, context.Canceled }
 
 	if _, err := h.run(t); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)

@@ -118,7 +118,11 @@ func (t *transport) postJSON(ctx context.Context, url string, headers map[string
 			return timing, t.httpError(resp.StatusCode, respBody)
 		}
 
-		wait := backoff(attempt, resp.Header.Get("Retry-After"))
+		retryAfter := resp.Header.Get("Retry-After")
+		if retryAfter == "" {
+			retryAfter = retryDelayFromBody(respBody)
+		}
+		wait := backoff(attempt, retryAfter)
 		if wait > maxBackoff {
 			return timing, t.httpError(resp.StatusCode, respBody)
 		}
@@ -127,6 +131,32 @@ func (t *transport) postJSON(ctx context.Context, url string, headers map[string
 		}
 		timing.Backoff += wait
 	}
+}
+
+// retryDelayFromBody reads the wait Gemini puts in its error body instead of
+// a Retry-After header (google.rpc.RetryInfo, e.g. "retryDelay": "27s"),
+// returned as whole seconds in Retry-After form.
+func retryDelayFromBody(body []byte) string {
+	var parsed struct {
+		Error *struct {
+			Details []struct {
+				RetryDelay string `json:"retryDelay"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &parsed) != nil || parsed.Error == nil {
+		return ""
+	}
+	for _, d := range parsed.Error.Details {
+		if d.RetryDelay == "" {
+			continue
+		}
+		if wait, err := time.ParseDuration(d.RetryDelay); err == nil && wait >= 0 {
+			// Round up so we never retry a moment too early.
+			return strconv.Itoa(int((wait + time.Second - 1) / time.Second))
+		}
+	}
+	return ""
 }
 
 // backoff returns how long to wait before retry number attempt+1.
