@@ -2,9 +2,11 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -258,5 +260,49 @@ func TestIsConfigError(t *testing.T) {
 		if got := IsConfigError(fmt.Errorf("agent: %w", err)); got != want {
 			t.Errorf("HTTP %d: IsConfigError = %v, want %v", code, got, want)
 		}
+	}
+}
+
+func TestNoToolCalls(t *testing.T) {
+	tests := []struct {
+		name string
+		resp string
+		new  func(*httptest.Server, *sleeps) Provider
+		want func(body map[string]any) any
+		val  any
+	}{
+		{"openai", openAIText, func(s *httptest.Server, sl *sleeps) Provider { return newTestOpenAI(s, sl) },
+			func(b map[string]any) any { return b["tool_choice"] }, "none"},
+		{"gemini", geminiText, func(s *httptest.Server, sl *sleeps) Provider { return newTestGemini(s, sl) },
+			func(b map[string]any) any {
+				tc, _ := b["toolConfig"].(map[string]any)
+				fc, _ := tc["functionCallingConfig"].(map[string]any)
+				return fc["mode"]
+			}, "NONE"},
+		{"anthropic", anthropicText, func(s *httptest.Server, sl *sleeps) Provider { return newTestAnthropic(s, sl) },
+			func(b map[string]any) any {
+				tc, _ := b["tool_choice"].(map[string]any)
+				return tc["type"]
+			}, "none"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := sampleRequest
+			req.NoToolCalls = true
+			ts, rec := newServer(t, ok(tt.resp))
+			if _, err := tt.new(ts, &sleeps{}).Chat(context.Background(), req); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			var body map[string]any
+			if err := json.Unmarshal(rec.bodies[0], &body); err != nil {
+				t.Fatal(err)
+			}
+			if got := tt.want(body); got != tt.val {
+				t.Errorf("tool choice = %v, want %v", got, tt.val)
+			}
+			if body["tools"] == nil {
+				t.Error("tools must stay declared")
+			}
+		})
 	}
 }

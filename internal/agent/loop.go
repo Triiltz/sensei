@@ -140,6 +140,7 @@ func (r *runner) run(ctx context.Context, question string) (Result, error) {
 	r.res.HitMaxSteps = true
 	r.logf("%s\n", r.dim(fmt.Sprintf("Step limit reached (%d). Asking for a summary of what was found.", r.cfg.MaxSteps)))
 	req.System += stepLimitNote
+	req.NoToolCalls = true // the note alone is not enough: models still call tools
 	resp, err := r.chat(ctx, req)
 	if err != nil {
 		return r.res, err

@@ -35,6 +35,7 @@ type openAIRequest struct {
 	Instructions    string            `json:"instructions,omitempty"`
 	Input           []json.RawMessage `json:"input"`
 	Tools           []openAITool      `json:"tools,omitempty"`
+	ToolChoice      string            `json:"tool_choice,omitempty"`
 	MaxOutputTokens int               `json:"max_output_tokens"`
 }
 
@@ -88,6 +89,9 @@ func (o *OpenAI) Chat(ctx context.Context, req Request) (Response, error) {
 		payload.Tools = append(payload.Tools, openAITool{
 			Type: "function", Name: t.Name, Description: t.Description, Parameters: t.Parameters,
 		})
+	}
+	if req.NoToolCalls && len(payload.Tools) > 0 {
+		payload.ToolChoice = "none"
 	}
 
 	var result openAIResponse

@@ -32,11 +32,14 @@ func (a *Anthropic) Name() string  { return "anthropic" }
 func (a *Anthropic) Model() string { return a.cfg.Model }
 
 type anthropicRequest struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	System    string             `json:"system,omitempty"`
-	Messages  []anthropicMessage `json:"messages"`
-	Tools     []anthropicTool    `json:"tools,omitempty"`
+	Model      string             `json:"model"`
+	MaxTokens  int                `json:"max_tokens"`
+	System     string             `json:"system,omitempty"`
+	Messages   []anthropicMessage `json:"messages"`
+	Tools      []anthropicTool    `json:"tools,omitempty"`
+	ToolChoice *struct {
+		Type string `json:"type"`
+	} `json:"tool_choice,omitempty"`
 }
 
 type anthropicMessage struct {
@@ -84,6 +87,11 @@ func (a *Anthropic) Chat(ctx context.Context, req Request) (Response, error) {
 	}
 	for _, t := range req.Tools {
 		payload.Tools = append(payload.Tools, anthropicTool{Name: t.Name, Description: t.Description, InputSchema: t.Parameters})
+	}
+	if req.NoToolCalls && len(payload.Tools) > 0 {
+		payload.ToolChoice = &struct {
+			Type string `json:"type"`
+		}{Type: "none"}
 	}
 
 	var result anthropicResponse

@@ -180,9 +180,13 @@ The classifier parses the command line (quotes, pipes, `&&`, subshells, redirect
 - **Average steps and tokens**, **cost per task** (from [`evals/prices.yaml`](evals/prices.yaml)) and **p50 latency**.
 - **Unsafe attempts**: commands the policy classified `dangerous`. They are always denied in evals and counted.
 
-<!-- RESULTS: table from evals/results/<final>.md goes here, with the free vs. paid reading -->
+The published results below are from Gemini models on the **free tier**. The OpenAI and Anthropic adapters are covered by tests against recorded API formats but were not part of this evaluation run; with paid keys you can compare them yourself (see [Running it](#running-it)).
 
-_Results table coming with the v1.1.0 release._
+<!-- RESULTS: table from evals/results/<final>.md goes here -->
+
+_Results table coming soon._
+
+One bug this harness caught early: when the agent hit its step limit, the request asking it to summarize its findings still offered the tool, and a model answered with another tool call instead of text, so the user got "stopped without an answer" even though the model had already seen the error. The summary request now forbids tool calls at the API level (`tool_choice: none` and equivalents) instead of only asking in the prompt.
 
 ### How it works
 
@@ -196,9 +200,14 @@ _Results table coming with the v1.1.0 release._
 ```bash
 sensei eval --providers gemini --tasks 'find-*'          # a few tasks
 sensei eval --models gemini=gemini-3.5-flash-lite,gemini=gemini-3.8-flash
-sensei eval --providers gemini,openai,anthropic --repeat 3 --repeat-for gemini=1
 sensei eval --resume evals/results/2026-11-02T10-00-00.json
+
+# With paid keys: free Gemini once, paid models three times each
+export OPENAI_API_KEY=sk-... ANTHROPIC_API_KEY=sk-ant-...
+sensei eval --providers gemini,openai,anthropic --repeat 3 --repeat-for gemini=1
 ```
+
+Each provider reads its own key variable, so all three can be set at once.
 
 Run it from the repository root. It asks before calling the APIs (`--yes` skips the question) and writes `evals/results/<timestamp>.json` (raw runs) and `.md` (summary).
 

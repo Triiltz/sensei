@@ -65,6 +65,10 @@ type Request struct {
 	Messages  []Message
 	Tools     []Tool
 	MaxTokens int // 0 means the adapter's default
+
+	// NoToolCalls keeps Tools declared (a history with tool calls needs
+	// them) but forbids calling them, so the model must answer in text.
+	NoToolCalls bool
 }
 
 // Response is a provider-neutral chat response.

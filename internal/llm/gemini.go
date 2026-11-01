@@ -34,12 +34,19 @@ func (g *Gemini) Name() string  { return "gemini" }
 func (g *Gemini) Model() string { return g.cfg.Model }
 
 type geminiRequest struct {
-	SystemInstruction *geminiContent  `json:"systemInstruction,omitempty"`
-	Contents          []geminiContent `json:"contents"`
-	Tools             []geminiTool    `json:"tools,omitempty"`
+	SystemInstruction *geminiContent    `json:"systemInstruction,omitempty"`
+	Contents          []geminiContent   `json:"contents"`
+	Tools             []geminiTool      `json:"tools,omitempty"`
+	ToolConfig        *geminiToolConfig `json:"toolConfig,omitempty"`
 	GenerationConfig  struct {
 		MaxOutputTokens int `json:"maxOutputTokens"`
 	} `json:"generationConfig"`
+}
+
+type geminiToolConfig struct {
+	FunctionCallingConfig struct {
+		Mode string `json:"mode"` // NONE forbids function calls
+	} `json:"functionCallingConfig"`
 }
 
 type geminiContent struct {
@@ -110,6 +117,10 @@ func (g *Gemini) Chat(ctx context.Context, req Request) (Response, error) {
 			decls = append(decls, geminiFunctionDecl{Name: t.Name, Description: t.Description, Parameters: t.Parameters})
 		}
 		payload.Tools = []geminiTool{{FunctionDeclarations: decls}}
+		if req.NoToolCalls {
+			payload.ToolConfig = &geminiToolConfig{}
+			payload.ToolConfig.FunctionCallingConfig.Mode = "NONE"
+		}
 	}
 
 	url := fmt.Sprintf("%s/models/%s:generateContent", g.baseURL, g.cfg.Model)

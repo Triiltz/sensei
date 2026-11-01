@@ -160,6 +160,12 @@ func TestLoopMaxStepsReached(t *testing.T) {
 	if strings.Contains(h.provider.reqs[1].System, "step limit") {
 		t.Error("the limit note leaked into a normal step")
 	}
+	if !h.provider.reqs[2].NoToolCalls || h.provider.reqs[1].NoToolCalls {
+		t.Error("only the summary request must forbid tool calls")
+	}
+	if len(h.provider.reqs[2].Tools) == 0 {
+		t.Error("the summary request must keep the tools declared")
+	}
 	if res.Answer != "Found two files; the cause is still unknown." {
 		t.Errorf("Answer = %q", res.Answer)
 	}
