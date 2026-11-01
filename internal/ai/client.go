@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -49,10 +50,23 @@ Rules:
 - Do NOT use Markdown formatting (no **bold**, *italic*, headings, tables, inline backticks, or code fences).`
 )
 
+// Default provider endpoints. They are fields on Client so tests can point
+// them at an httptest server.
+const (
+	defaultOpenAIURL = "https://api.openai.com/v1/chat/completions"
+	defaultGeminiURL = "https://generativelanguage.googleapis.com/v1beta"
+)
+
 // Client handles communication with the AI provider's API.
 type Client struct {
 	cfg        *config.Config
 	httpClient *http.Client
+
+	openAIURL  string
+	geminiBase string
+
+	// warnf reports non-fatal notices (such as input truncation) to the user.
+	warnf func(format string, args ...any)
 }
 
 // NewClient creates a new AI client from the given config.
@@ -61,6 +75,11 @@ func NewClient(cfg *config.Config) *Client {
 		cfg: cfg,
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
+		},
+		openAIURL:  defaultOpenAIURL,
+		geminiBase: defaultGeminiURL,
+		warnf: func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, format+"\n", args...)
 		},
 	}
 }
@@ -74,6 +93,7 @@ func (c *Client) Ask(userPrompt string, pipeContent string) (string, error) {
 	systemPrompt := TerminalSystemPrompt
 	if pipeContent != "" {
 		if len(pipeContent) > maxPipeContentLen {
+			c.warnf("Warning: piped input was truncated from %d to %d characters.", len(pipeContent), maxPipeContentLen)
 			pipeContent = pipeContent[:maxPipeContentLen] + "\n\n[... content truncated due to size limit ...]"
 		}
 		systemPrompt = PipeSystemPrompt
@@ -88,6 +108,60 @@ func (c *Client) Ask(userPrompt string, pipeContent string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported provider: %s", c.cfg.Provider)
 	}
+}
+
+// apiErrorBody covers the error envelope used by both providers.
+type apiErrorBody struct {
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// httpError turns a non-2xx response into an actionable message. Providers
+// usually return a JSON error envelope, but gateways and proxies return HTML,
+// so the raw body is used as a fallback instead of a parse failure.
+func (c *Client) httpError(provider string, status int, body []byte) error {
+	detail := ""
+	var parsed apiErrorBody
+	if err := json.Unmarshal(body, &parsed); err == nil && parsed.Error != nil {
+		detail = parsed.Error.Message
+	}
+	if detail == "" {
+		detail = truncate(strings.TrimSpace(string(body)), 300)
+	}
+	if detail == "" {
+		detail = http.StatusText(status)
+	}
+
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return fmt.Errorf("%s: authentication failed (HTTP %d): %s\n\n"+
+			"Check that SENSEI_API_KEY holds a valid %s key and that SENSEI_PROVIDER matches it",
+			provider, status, detail, provider)
+	case http.StatusNotFound:
+		return fmt.Errorf("%s: model %q not found (HTTP %d): %s\n\n"+
+			"Check SENSEI_MODEL, or unset it to use the default",
+			provider, c.cfg.Model, status, detail)
+	case http.StatusTooManyRequests:
+		return fmt.Errorf("%s: rate limit or quota exceeded (HTTP %d): %s\n\n"+
+			"Wait a moment and try again, or check your billing/usage limits",
+			provider, status, detail)
+	default:
+		if status >= 500 {
+			return fmt.Errorf("%s: provider is unavailable (HTTP %d): %s\n\n"+
+				"This is on the provider's side — try again shortly",
+				provider, status, detail)
+		}
+		return fmt.Errorf("%s: API error (HTTP %d): %s", provider, status, detail)
+	}
+}
+
+// truncate shortens s to at most n characters, marking that it was cut.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 // ──────────────────────────────────────────────
@@ -129,7 +203,7 @@ func (c *Client) askOpenAI(systemPrompt, userPrompt string) (string, error) {
 		return "", fmt.Errorf("openai: failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
+	req, err := http.NewRequest("POST", c.openAIURL, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("openai: failed to create request: %w", err)
 	}
@@ -146,6 +220,10 @@ func (c *Client) askOpenAI(systemPrompt, userPrompt string) (string, error) {
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("openai: failed to read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return "", c.httpError("openai", resp.StatusCode, respBody)
 	}
 
 	var result openAIResponse
@@ -209,10 +287,7 @@ func (c *Client) askGemini(systemPrompt, userPrompt string) (string, error) {
 		return "", fmt.Errorf("gemini: failed to marshal request: %w", err)
 	}
 
-	url := fmt.Sprintf(
-		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent",
-		c.cfg.Model,
-	)
+	url := fmt.Sprintf("%s/models/%s:generateContent", c.geminiBase, c.cfg.Model)
 
 	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
@@ -231,6 +306,10 @@ func (c *Client) askGemini(systemPrompt, userPrompt string) (string, error) {
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("gemini: failed to read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return "", c.httpError("gemini", resp.StatusCode, respBody)
 	}
 
 	var result geminiResponse
