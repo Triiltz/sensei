@@ -8,7 +8,8 @@
 
 ### Prerequisites
 
-- [Go 1.21+](https://go.dev/dl/)
+- [Go 1.23+](https://go.dev/dl/)
+- Linux or macOS (on Windows, use WSL — command execution assumes a POSIX shell)
 
 ### Via `go install` (recommended)
 
@@ -86,7 +87,7 @@ By default, SENSEI uses models optimized for speed and cost:
 | Provider | Default model |
 |----------|--------------|
 | OpenAI | `gpt-4o-mini` |
-| Gemini | `gemini-2.0-flash` |
+| Gemini | `gemini-2.5-flash` |
 
 To use a different model:
 
@@ -134,6 +135,15 @@ git diff | sensei "summarize these changes"
 
 In this mode, SENSEI automatically switches behavior: instead of being concise, it explains the content in a detailed and structured way.
 
+### Composing with other tools
+
+The response goes to stdout and the spinner to stderr, so SENSEI pipes and redirects cleanly:
+
+```bash
+sensei "explain the TCP handshake" > notes.txt
+git diff | sensei "summarize these changes" | tee review.txt
+```
+
 ### Flags
 
 | Flag | Short | Description |
@@ -141,6 +151,7 @@ In this mode, SENSEI automatically switches behavior: instead of being concise, 
 | `--force` | `-f` | Execute the suggested command automatically, skipping confirmation |
 | `--openai` | `-o` | Open ChatGPT in the default browser |
 | `--gemini` | `-g` | Open Google Gemini in the default browser |
+| `--version` | `-v` | Show the installed version |
 | `--help` | `-h` | Show help |
 
 ```bash
@@ -153,6 +164,17 @@ sensei -o
 # Open Gemini in the browser:
 sensei -g
 ```
+
+> **`-f` is rejected when input is piped.** Piped content is untrusted: a log or
+> file could contain text that steers the model into suggesting a command you
+> never intended, and `-f` would run it without asking. Run without `-f` and
+> confirm the command yourself.
+
+### A note on running suggested commands
+
+SENSEI asks before running anything, but the command is written by a language
+model — **read it before answering `y`**. Treat it the way you would treat a
+command copied from a random blog post.
 
 ---
 
@@ -200,18 +222,27 @@ sensei/
 │   └── root.go            # CLI (Cobra): flags, pipe detection, orchestration
 ├── internal/
 │   ├── ai/
-│   │   └── client.go      # Dual HTTP client: OpenAI + Gemini
+│   │   ├── client.go      # Dual HTTP client: OpenAI + Gemini
+│   │   └── client_test.go
 │   ├── config/
-│   │   └── config.go      # Reads environment variables (API key, provider, model)
+│   │   ├── config.go      # Reads environment variables (API key, provider, model)
+│   │   └── config_test.go
 │   └── executor/
-│       └── runner.go      # COMMAND= parsing, confirmation prompt, shell execution
+│       ├── runner.go      # COMMAND= parsing, confirmation prompt, shell execution
+│       └── runner_test.go
 ├── main.go                # Entry point
 ├── go.mod
 └── go.sum
+```
+
+### Running the tests
+
+```bash
+go test ./...
 ```
 
 ---
 
 ## License
 
-MIT
+[MIT](LICENSE)
