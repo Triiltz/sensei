@@ -46,7 +46,7 @@ type Command struct {
 // Several commands, or a command with placeholders, are shown but never run:
 // there is no single safe thing to confirm.
 func Run(ctx context.Context, text string, cmds []Command, force bool) error {
-	text = normalizePlainText(text)
+	text = NormalizePlainText(text)
 	if text == "" && len(cmds) == 1 {
 		text = cmds[0].Reason
 	}
@@ -68,7 +68,7 @@ func Run(ctx context.Context, text string, cmds []Command, force bool) error {
 	fmt.Fprintf(stdout, "\nSuggested command: %s\n", command)
 
 	if !force {
-		ok, err := confirm(ctx)
+		ok, err := Confirm(ctx, stdout, "   Run it? [y/N]: ")
 		if err != nil {
 			return err
 		}
@@ -81,16 +81,17 @@ func Run(ctx context.Context, text string, cmds []Command, force bool) error {
 	return runShell(ctx, command)
 }
 
-// confirm asks "Run it? [y/N]" on the terminal and reports the answer.
-func confirm(ctx context.Context) (bool, error) {
+// Confirm writes prompt to w, reads a yes/no answer from the terminal and
+// reports whether the user said yes. Without a terminal the answer is no.
+func Confirm(ctx context.Context, w io.Writer, prompt string) (bool, error) {
 	tty, err := openTTY()
 	if err != nil {
-		fmt.Fprintln(stdout, "Not running it: there is no terminal to confirm the command on.")
+		fmt.Fprintln(w, "Not running it: there is no terminal to confirm the command on.")
 		return false, nil
 	}
 	defer tty.Close()
 
-	fmt.Fprint(stdout, "   Run it? [y/N]: ")
+	fmt.Fprint(w, prompt)
 
 	// Read in the background so Ctrl+C (which cancels ctx) is not stuck
 	// behind a blocking read.
@@ -102,24 +103,24 @@ func confirm(ctx context.Context) (bool, error) {
 
 	select {
 	case <-ctx.Done():
-		fmt.Fprintln(stdout)
+		fmt.Fprintln(w)
 		return false, ctx.Err()
 	case answer := <-answers:
 		answer = strings.TrimSpace(strings.ToLower(answer))
 		if answer != "y" && answer != "yes" {
-			fmt.Fprintln(stdout, "Aborted.")
+			fmt.Fprintln(w, "Aborted.")
 			return false, nil
 		}
 		return true, nil
 	}
 }
 
-// normalizePlainText removes common Markdown markers so output stays terminal-friendly.
+// NormalizePlainText removes common Markdown markers so output stays terminal-friendly.
 //
 // It is deliberately conservative: only real Markdown constructs are stripped,
 // so shebangs, shell comments and backticks used for command substitution
 // survive intact — those show up constantly when analysing piped scripts.
-func normalizePlainText(text string) string {
+func NormalizePlainText(text string) string {
 	if text == "" {
 		return text
 	}
@@ -166,12 +167,7 @@ func normalizePlainText(text string) string {
 
 // execute runs the command through the user's shell and streams output.
 func execute(ctx context.Context, command string) error {
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/sh"
-	}
-
-	cmd := exec.CommandContext(ctx, shell, "-c", command)
+	cmd := exec.CommandContext(ctx, shellPath(), "-c", command)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

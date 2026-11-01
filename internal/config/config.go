@@ -3,7 +3,9 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Provider represents the AI provider being used.
@@ -43,7 +45,16 @@ type Config struct {
 	// KeyVar is the environment variable the key was read from, so error
 	// messages can point at the right place.
 	KeyVar string
+
+	// Agent mode limits.
+	MaxSteps   int           // SENSEI_MAX_STEPS
+	CmdTimeout time.Duration // SENSEI_CMD_TIMEOUT
 }
+
+const (
+	defaultMaxSteps   = 8
+	defaultCmdTimeout = 30 * time.Second
+)
 
 // Load resolves the provider, API key and model from environment variables.
 //
@@ -64,7 +75,38 @@ func Load() (*Config, error) {
 	if cfg.Model == "" {
 		cfg.Model = defaultModels[cfg.Provider]
 	}
+
+	cfg.MaxSteps = defaultMaxSteps
+	if v := os.Getenv("SENSEI_MAX_STEPS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return nil, fmt.Errorf("SENSEI_MAX_STEPS must be a positive integer, got %q", v)
+		}
+		cfg.MaxSteps = n
+	}
+
+	cfg.CmdTimeout = defaultCmdTimeout
+	if v := os.Getenv("SENSEI_CMD_TIMEOUT"); v != "" {
+		d, err := parseDuration(v)
+		if err != nil {
+			return nil, fmt.Errorf("SENSEI_CMD_TIMEOUT must be a duration like 30s or 2m, got %q", v)
+		}
+		cfg.CmdTimeout = d
+	}
+
 	return cfg, nil
+}
+
+// parseDuration accepts Go durations ("45s", "2m") and plain seconds ("45").
+func parseDuration(v string) (time.Duration, error) {
+	if secs, err := strconv.Atoi(v); err == nil {
+		v = strconv.Itoa(secs) + "s"
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("invalid duration %q", v)
+	}
+	return d, nil
 }
 
 func resolve() (*Config, error) {

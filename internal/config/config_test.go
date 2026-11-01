@@ -3,10 +3,11 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 var allVars = []string{
-	"SENSEI_API_KEY", "SENSEI_PROVIDER", "SENSEI_MODEL",
+	"SENSEI_API_KEY", "SENSEI_PROVIDER", "SENSEI_MODEL", "SENSEI_MAX_STEPS", "SENSEI_CMD_TIMEOUT",
 	"GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
 }
 
@@ -205,6 +206,50 @@ func TestLoad(t *testing.T) {
 			}
 			if cfg.Model != tt.wantModel {
 				t.Errorf("Model = %q, want %q", cfg.Model, tt.wantModel)
+			}
+		})
+	}
+}
+
+func TestLoadAgentLimits(t *testing.T) {
+	tests := []struct {
+		name        string
+		maxSteps    string
+		cmdTimeout  string
+		wantSteps   int
+		wantTimeout time.Duration
+		wantErr     string
+	}{
+		{name: "defaults", wantSteps: 8, wantTimeout: 30 * time.Second},
+		{name: "overrides", maxSteps: "3", cmdTimeout: "2m", wantSteps: 3, wantTimeout: 2 * time.Minute},
+		{name: "plain seconds", cmdTimeout: "45", wantSteps: 8, wantTimeout: 45 * time.Second},
+		{name: "zero steps", maxSteps: "0", wantErr: "SENSEI_MAX_STEPS"},
+		{name: "non-numeric steps", maxSteps: "many", wantErr: "SENSEI_MAX_STEPS"},
+		{name: "bad timeout", cmdTimeout: "soon", wantErr: "SENSEI_CMD_TIMEOUT"},
+		{name: "negative timeout", cmdTimeout: "-5s", wantErr: "SENSEI_CMD_TIMEOUT"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, v := range allVars {
+				t.Setenv(v, "")
+			}
+			t.Setenv("SENSEI_API_KEY", "AIza-test")
+			t.Setenv("SENSEI_MAX_STEPS", tt.maxSteps)
+			t.Setenv("SENSEI_CMD_TIMEOUT", tt.cmdTimeout)
+
+			cfg, err := Load()
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want it to contain %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cfg.MaxSteps != tt.wantSteps || cfg.CmdTimeout != tt.wantTimeout {
+				t.Errorf("got %d steps / %v, want %d / %v", cfg.MaxSteps, cfg.CmdTimeout, tt.wantSteps, tt.wantTimeout)
 			}
 		})
 	}

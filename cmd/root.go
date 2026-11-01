@@ -22,9 +22,11 @@ import (
 )
 
 var (
-	forceFlag  bool
-	openAIFlag bool
-	geminiFlag bool
+	forceFlag   bool
+	openAIFlag  bool
+	geminiFlag  bool
+	agentFlag   bool
+	verboseFlag bool
 )
 
 // version is set at build time via -ldflags "-X github.com/triiltz/sensei/cmd.version=vX.Y.Z".
@@ -39,6 +41,7 @@ Examples:
   sensei "how to untar a tar.gz?"
   cat script.sh | sensei "what does this do?"
   sensei -f "create a new git branch called feature/login"
+  sensei -a "why won't my container start?"   (agent: investigates step by step)
   sensei -o    (open ChatGPT in browser)
   sensei -g    (open Gemini in browser)`,
 	Version:       version,
@@ -49,6 +52,8 @@ Examples:
 
 func init() {
 	rootCmd.Flags().BoolVarP(&forceFlag, "force", "f", false, "Execute the suggested command without confirmation")
+	rootCmd.Flags().BoolVarP(&agentFlag, "agent", "a", false, "Agent mode: run commands step by step until the question is answered")
+	rootCmd.Flags().BoolVar(&verboseFlag, "verbose", false, "In agent mode, also print each command's output")
 	rootCmd.Flags().BoolVarP(&openAIFlag, "openai", "o", false, "Open ChatGPT in the default browser")
 	rootCmd.Flags().BoolVarP(&geminiFlag, "gemini", "g", false, "Open Google Gemini in the default browser")
 	rootCmd.MarkFlagsMutuallyExclusive("openai", "gemini")
@@ -94,6 +99,12 @@ func run(cmd *cobra.Command, args []string) error {
 			"Piped content is untrusted and could make the model suggest an unintended command.\n" +
 			"Run without -f and confirm the command yourself.")
 	}
+	// Pipe mode is analysis only, for the same reason.
+	if pipeContent != "" && agentFlag {
+		return fmt.Errorf("-a cannot be used with piped input.\n\n" +
+			"Pipe mode only analyses the content. To let SENSEI investigate a file, ask in agent mode:\n" +
+			"  sensei -a \"what is wrong in app.log?\"")
+	}
 
 	// Build the user prompt from arguments.
 	userPrompt := strings.Join(args, " ")
@@ -119,6 +130,24 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
+
+	if agentFlag {
+		_, err := agent.Run(ctx, agent.Config{
+			Provider:   provider,
+			MaxSteps:   cfg.MaxSteps,
+			CmdTimeout: cfg.CmdTimeout,
+			Force:      forceFlag,
+			Verbose:    verboseFlag,
+			Out:        os.Stdout,
+			Log:        os.Stderr,
+			Color:      isTerminal(os.Stderr),
+			Thinking:   startSpinner,
+		}, userPrompt)
+		if err != nil && ctx.Err() == nil {
+			return fmt.Errorf("agent stopped: %w", err)
+		}
+		return err
+	}
 
 	stopSpinner := startSpinner()
 	answer, err := agent.Ask(ctx, provider, userPrompt, pipeContent, warnf)

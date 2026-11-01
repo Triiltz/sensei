@@ -214,7 +214,7 @@ func TestNormalizePlainText(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := normalizePlainText(tt.in); got != tt.want {
+			if got := NormalizePlainText(tt.in); got != tt.want {
 				t.Errorf("\ngot  %q\nwant %q", got, tt.want)
 			}
 		})
