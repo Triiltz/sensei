@@ -1,0 +1,15 @@
+id: count-error-lines
+category: single-step
+prompt: "How many ERROR lines are in app.log?"
+setup: |
+  i=1
+  while [ $i -le 100 ]; do
+    if [ $((i % 6)) -eq 0 ]; then echo "2026-10-01 ERROR db timeout id=$i"; else echo "2026-10-01 INFO request id=$i ok"; fi
+    i=$((i + 1))
+  done > app.log
+max_steps: 4
+# Solves the task; used by the suite self-test, never shown to the model.
+reference: "grep -c ERROR app.log"
+check:
+  type: answer_contains
+  any_of: ["16"]

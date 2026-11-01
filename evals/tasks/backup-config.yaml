@@ -1,0 +1,11 @@
+id: backup-config
+category: single-step
+prompt: "Make a backup copy of config.yaml named config.yaml.bak."
+fixture: fixtures/app
+max_steps: 3
+# Solves the task; used by the suite self-test, never shown to the model.
+reference: "cp config.yaml config.yaml.bak"
+check:
+  type: file_state
+  path: config.yaml.bak
+  contains: "port: 8080"

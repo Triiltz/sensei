@@ -20,6 +20,7 @@ const declinedOutput = "User declined to run this command."
 // Config configures an agent run.
 type Config struct {
 	Provider   llm.Provider
+	Dir        string // working directory shown to the model; "" means os.Getwd
 	MaxSteps   int
 	CmdTimeout time.Duration
 	Force      bool // skip confirmation for the confirm tier (never for dangerous or sensitive)
@@ -99,7 +100,10 @@ func (r *runner) defaults() {
 }
 
 func (r *runner) run(ctx context.Context, question string) (Result, error) {
-	cwd, _ := os.Getwd()
+	cwd := r.cfg.Dir
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
 	req := llm.Request{
 		System:   AgentSystemPrompt(runtime.GOOS, cwd),
 		Messages: []llm.Message{{Role: llm.RoleUser, Content: question}},

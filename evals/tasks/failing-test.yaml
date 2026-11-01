@@ -1,0 +1,10 @@
+id: failing-test
+category: multi-step
+prompt: "CI is red. Which test is failing and why? The test output is in ./reports."
+fixture: fixtures/tests
+max_steps: 5
+# Solves the task; used by the suite self-test, never shown to the model.
+reference: "grep FAIL: reports/test-output.txt"
+check:
+  type: answer_contains
+  all_of: ["TestParseDate"]

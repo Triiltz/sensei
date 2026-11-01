@@ -1,0 +1,10 @@
+id: cron-backup-broken
+category: multi-step
+prompt: "My nightly backup stopped working two days ago. What's wrong?"
+fixture: fixtures/cron
+max_steps: 6
+# Solves the task; used by the suite self-test, never shown to the model.
+reference: "tail -1 logs/backup.log"
+check:
+  type: answer_contains
+  any_of: ["DEST"]

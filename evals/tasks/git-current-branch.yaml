@@ -1,0 +1,12 @@
+id: git-current-branch
+category: single-step
+prompt: "Which git branch am I on?"
+setup: |
+  git init -q -b main && echo app > app.txt && git add . && git commit -qm init
+  git checkout -qb feature/login
+max_steps: 3
+# Solves the task; used by the suite self-test, never shown to the model.
+reference: "git branch --show-current"
+check:
+  type: answer_contains
+  any_of: ["feature/login"]

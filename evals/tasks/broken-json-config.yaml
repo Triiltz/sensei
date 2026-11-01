@@ -1,0 +1,11 @@
+id: broken-json-config
+category: multi-step
+prompt: "The service won't start. Figure out what's wrong."
+fixture: fixtures/broken-json
+max_steps: 6
+# Solves the task; used by the suite self-test, never shown to the model.
+reference: "echo \"config.json has a trailing comma on line 4\""
+check:
+  type: answer_contains
+  all_of: ["config.json"]
+  any_of: ["comma", "line 5", "line 4"]

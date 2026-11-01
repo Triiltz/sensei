@@ -128,3 +128,16 @@ func TestResultFormat(t *testing.T) {
 		t.Errorf("timeout not reported: %s", got)
 	}
 }
+
+func TestSandboxCapture(t *testing.T) {
+	dir := t.TempDir()
+	sb := Sandbox{Dir: dir, Env: []string{"HOME=/sandbox-home", "PATH=/usr/bin:/bin"}}
+
+	res, err := sb.Capture(context.Background(), "pwd; echo $HOME", 5*time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := dir + "\n/sandbox-home\n"; res.Stdout != want {
+		t.Errorf("stdout = %q, want %q", res.Stdout, want)
+	}
+}

@@ -31,19 +31,34 @@ type Result struct {
 	Duration time.Duration
 }
 
+// Capture runs command in the current directory and environment. See
+// Sandbox.Capture.
+func Capture(ctx context.Context, command string, timeout time.Duration) (Result, error) {
+	return Sandbox{}.Capture(ctx, command, timeout)
+}
+
+// Sandbox sets where captured commands run. The zero value inherits the
+// current directory and environment. It isolates (a different directory and
+// HOME), it does not contain: commands still run as the current user.
+type Sandbox struct {
+	Dir string   // working directory
+	Env []string // full environment, as in exec.Cmd.Env
+}
+
 // Capture runs command through /bin/sh with no stdin and a timeout, and
 // returns its output instead of streaming it. It is used in agent mode,
 // where the output goes back to the model.
 //
 // The command runs in its own process group so a timeout or Ctrl+C kills
 // everything it started, not just the shell.
-func Capture(ctx context.Context, command string, timeout time.Duration) (Result, error) {
+func (s Sandbox) Capture(ctx context.Context, command string, timeout time.Duration) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	// /bin/sh rather than $SHELL: the model writes POSIX commands, and fish
 	// or nushell would reject many of them.
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	cmd.Dir, cmd.Env = s.Dir, s.Env
 	stdout := &limitedBuffer{max: maxStreamBytes}
 	stderr := &limitedBuffer{max: maxStreamBytes}
 	cmd.Stdout, cmd.Stderr = stdout, stderr

@@ -1,0 +1,14 @@
+id: find-largest-log
+category: single-step
+prompt: "Which file in ./logs is the largest?"
+setup: |
+  mkdir -p logs
+  head -c 2000 /dev/zero | tr '\0' a > logs/app-2026-08.log
+  head -c 90000 /dev/zero | tr '\0' b > logs/app-2026-10.log
+  head -c 30000 /dev/zero | tr '\0' c > logs/app-2026-09.log
+max_steps: 4
+# Solves the task; used by the suite self-test, never shown to the model.
+reference: "ls -S logs | head -1"
+check:
+  type: answer_contains
+  any_of: ["app-2026-10.log"]

@@ -1,0 +1,12 @@
+id: gitignore-node-modules
+category: single-step
+prompt: "Add node_modules to the .gitignore file, keeping what is already there."
+fixture: fixtures/app
+setup: "mv gitignore.txt .gitignore"
+max_steps: 4
+# Solves the task; used by the suite self-test, never shown to the model.
+reference: "echo node_modules >> .gitignore"
+check:
+  type: file_state
+  path: .gitignore
+  contains: "node_modules"

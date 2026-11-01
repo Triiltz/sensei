@@ -47,7 +47,10 @@ Examples:
 	Version:       version,
 	SilenceUsage:  true,
 	SilenceErrors: true,
-	RunE:          run,
+	// Arbitrary args: the question is free text, and subcommands (eval) must
+	// not make cobra reject words it does not recognise.
+	Args: cobra.ArbitraryArgs,
+	RunE: run,
 }
 
 func init() {

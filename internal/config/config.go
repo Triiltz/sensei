@@ -18,10 +18,12 @@ const (
 )
 
 // Default models: the cheap/fast tier of each provider. The Gemini default
-// must stay on a model that is available on the free tier.
+// must stay on a model that is available on the free tier, and Flash-Lite has
+// the most generous free-tier quota (Flash allowed only 20 requests a day in
+// November 2026). Flash stays available via SENSEI_MODEL=gemini-2.5-flash.
 var defaultModels = map[Provider]string{
 	ProviderOpenAI:    "gpt-6-luna",
-	ProviderGemini:    "gemini-2.5-flash",
+	ProviderGemini:    "gemini-2.5-flash-lite",
 	ProviderAnthropic: "claude-haiku-5-5",
 }
 
@@ -70,8 +72,26 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	return finish(cfg, os.Getenv("SENSEI_MODEL"))
+}
 
-	cfg.Model = os.Getenv("SENSEI_MODEL")
+// LoadFor resolves the key for a specific provider, as if SENSEI_PROVIDER
+// were set to it, and uses model (or the provider's default when empty).
+// The evaluation harness uses it to run several providers in one process.
+func LoadFor(provider Provider, model string) (*Config, error) {
+	cfg, err := resolveFor(provider, os.Getenv("SENSEI_API_KEY"))
+	if err != nil {
+		return nil, err
+	}
+	return finish(cfg, model)
+}
+
+// DefaultModel returns the model used for p when none is configured.
+func DefaultModel(p Provider) string { return defaultModels[p] }
+
+// finish fills in the model and the agent limits.
+func finish(cfg *Config, model string) (*Config, error) {
+	cfg.Model = model
 	if cfg.Model == "" {
 		cfg.Model = defaultModels[cfg.Provider]
 	}
@@ -113,28 +133,7 @@ func resolve() (*Config, error) {
 	senseiKey := os.Getenv("SENSEI_API_KEY")
 
 	if explicit := os.Getenv("SENSEI_PROVIDER"); explicit != "" {
-		provider := Provider(strings.ToLower(explicit))
-		if _, ok := defaultModels[provider]; !ok {
-			return nil, fmt.Errorf("unsupported provider %q. Use \"gemini\", \"openai\" or \"anthropic\"", explicit)
-		}
-
-		// An unrecognised prefix is trusted: key formats change, and the
-		// user has told us which provider it is for.
-		if senseiKey != "" {
-			if inferred, ok := inferProvider(senseiKey); !ok || inferred == provider {
-				return &Config{APIKey: senseiKey, Provider: provider, KeyVar: "SENSEI_API_KEY"}, nil
-			}
-		}
-
-		envVar := keyVarFor(provider)
-		if key := os.Getenv(envVar); key != "" {
-			return &Config{APIKey: key, Provider: provider, KeyVar: envVar}, nil
-		}
-		if senseiKey != "" {
-			return nil, fmt.Errorf("SENSEI_PROVIDER is %q, but SENSEI_API_KEY looks like a key for another provider.\n\n"+
-				"Set %s, or put a %s key in SENSEI_API_KEY", provider, envVar, provider)
-		}
-		return nil, fmt.Errorf("no API key found for %s.\n\nSet %s or SENSEI_API_KEY", provider, envVar)
+		return resolveFor(Provider(strings.ToLower(explicit)), senseiKey)
 	}
 
 	if senseiKey != "" {
@@ -161,6 +160,31 @@ func resolve() (*Config, error) {
 			"OpenAI and Anthropic keys work too (the provider is detected from the key).\n" +
 			"To choose it explicitly: export SENSEI_PROVIDER=\"gemini\"   # or openai, anthropic",
 	)
+}
+
+// resolveFor finds the key for a provider chosen explicitly.
+func resolveFor(provider Provider, senseiKey string) (*Config, error) {
+	if _, ok := defaultModels[provider]; !ok {
+		return nil, fmt.Errorf("unsupported provider %q. Use \"gemini\", \"openai\" or \"anthropic\"", provider)
+	}
+
+	// An unrecognised prefix is trusted: key formats change, and the
+	// user has told us which provider it is for.
+	if senseiKey != "" {
+		if inferred, ok := inferProvider(senseiKey); !ok || inferred == provider {
+			return &Config{APIKey: senseiKey, Provider: provider, KeyVar: "SENSEI_API_KEY"}, nil
+		}
+	}
+
+	envVar := keyVarFor(provider)
+	if key := os.Getenv(envVar); key != "" {
+		return &Config{APIKey: key, Provider: provider, KeyVar: envVar}, nil
+	}
+	if senseiKey != "" {
+		return nil, fmt.Errorf("%s was requested, but SENSEI_API_KEY looks like a key for another provider.\n\n"+
+			"Set %s, or put a %s key in SENSEI_API_KEY", provider, envVar, provider)
+	}
+	return nil, fmt.Errorf("no API key found for %s.\n\nSet %s or SENSEI_API_KEY", provider, envVar)
 }
 
 // inferProvider guesses the provider from a key's prefix. Anthropic keys also

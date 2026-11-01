@@ -34,7 +34,7 @@ func TestLoad(t *testing.T) {
 			wantProvider: ProviderGemini,
 			wantKey:      "AIza-test",
 			wantKeyVar:   "SENSEI_API_KEY",
-			wantModel:    "gemini-2.5-flash",
+			wantModel:    "gemini-2.5-flash-lite",
 		},
 		{
 			name:         "explicit provider trusts a key with an unknown prefix",
@@ -42,7 +42,7 @@ func TestLoad(t *testing.T) {
 			wantProvider: ProviderGemini,
 			wantKey:      "custom-key",
 			wantKeyVar:   "SENSEI_API_KEY",
-			wantModel:    "gemini-2.5-flash",
+			wantModel:    "gemini-2.5-flash-lite",
 		},
 		{
 			name:         "provider is case-insensitive",
@@ -103,7 +103,7 @@ func TestLoad(t *testing.T) {
 			wantProvider: ProviderGemini,
 			wantKey:      "AIzaSyTest",
 			wantKeyVar:   "SENSEI_API_KEY",
-			wantModel:    "gemini-2.5-flash",
+			wantModel:    "gemini-2.5-flash-lite",
 		},
 		{
 			name:         "sk-ant- is anthropic, not openai",
@@ -141,7 +141,7 @@ func TestLoad(t *testing.T) {
 			wantProvider: ProviderGemini,
 			wantKey:      "AIza-test",
 			wantKeyVar:   "GEMINI_API_KEY",
-			wantModel:    "gemini-2.5-flash",
+			wantModel:    "gemini-2.5-flash-lite",
 		},
 		{
 			name: "openai key wins over anthropic",
@@ -252,5 +252,28 @@ func TestLoadAgentLimits(t *testing.T) {
 				t.Errorf("got %d steps / %v, want %d / %v", cfg.MaxSteps, cfg.CmdTimeout, tt.wantSteps, tt.wantTimeout)
 			}
 		})
+	}
+}
+
+func TestLoadFor(t *testing.T) {
+	for _, v := range allVars {
+		t.Setenv(v, "")
+	}
+	t.Setenv("SENSEI_API_KEY", "AIza-gemini")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("SENSEI_MODEL", "ignored-by-LoadFor")
+
+	cfg, err := LoadFor(ProviderGemini, "")
+	if err != nil || cfg.APIKey != "AIza-gemini" || cfg.Model != "gemini-2.5-flash-lite" {
+		t.Errorf("LoadFor(gemini) = %+v, %v", cfg, err)
+	}
+
+	cfg, err = LoadFor(ProviderAnthropic, "claude-test")
+	if err != nil || cfg.APIKey != "sk-ant-test" || cfg.KeyVar != "ANTHROPIC_API_KEY" || cfg.Model != "claude-test" {
+		t.Errorf("LoadFor(anthropic) = %+v, %v", cfg, err)
+	}
+
+	if _, err := LoadFor(ProviderOpenAI, ""); err == nil || !strings.Contains(err.Error(), "OPENAI_API_KEY") {
+		t.Errorf("LoadFor(openai) without a key: err = %v", err)
 	}
 }

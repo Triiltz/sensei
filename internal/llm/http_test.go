@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -229,5 +230,22 @@ func TestNewSelectsAdapter(t *testing.T) {
 	}
 	if _, err := New(testConfig("mistral", "m")); err == nil {
 		t.Error("expected an error for an unknown provider")
+	}
+}
+
+func TestIsRateLimited(t *testing.T) {
+	ts, _ := newServer(t, fakeResp{status: 429, body: `{"error":{"message":"quota"}}`, header: map[string]string{"Retry-After": "3600"}})
+	_, err := newTestOpenAI(ts, &sleeps{}).Chat(context.Background(), Request{Messages: []Message{{Role: RoleUser, Content: "hi"}}})
+	if !IsRateLimited(err) {
+		t.Errorf("IsRateLimited(%v) = false", err)
+	}
+	if !IsRateLimited(fmt.Errorf("agent stopped: %w", err)) {
+		t.Error("IsRateLimited must see through wrapping")
+	}
+
+	ts, _ = newServer(t, fakeResp{status: 400, body: `{"error":{"message":"bad"}}`})
+	_, err = newTestOpenAI(ts, &sleeps{}).Chat(context.Background(), Request{Messages: []Message{{Role: RoleUser, Content: "hi"}}})
+	if err == nil || IsRateLimited(err) {
+		t.Errorf("a 400 is not a rate limit: %v", err)
 	}
 }

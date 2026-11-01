@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -175,6 +176,22 @@ func backoff(attempt int, retryAfter string) time.Duration {
 	return baseBackoff << attempt
 }
 
+// StatusError is a non-2xx response from a provider, after retries.
+type StatusError struct {
+	Provider string
+	Code     int
+	msg      string
+}
+
+func (e *StatusError) Error() string { return e.msg }
+
+// IsRateLimited reports whether err is a rate-limit or quota error (HTTP 429)
+// that survived the retries, as opposed to a failure of the request itself.
+func IsRateLimited(err error) bool {
+	var se *StatusError
+	return errors.As(err, &se) && se.Code == http.StatusTooManyRequests
+}
+
 // apiErrorBody covers the error envelope used by all three providers.
 type apiErrorBody struct {
 	Error *struct {
@@ -187,6 +204,10 @@ type apiErrorBody struct {
 // so the raw body is used as a fallback instead of a parse failure. The API
 // key is never part of the message.
 func (t *transport) httpError(status int, body []byte) error {
+	return &StatusError{Provider: t.provider, Code: status, msg: t.httpMessage(status, body)}
+}
+
+func (t *transport) httpMessage(status int, body []byte) string {
 	detail := ""
 	var parsed apiErrorBody
 	if err := json.Unmarshal(body, &parsed); err == nil && parsed.Error != nil {
@@ -201,24 +222,24 @@ func (t *transport) httpError(status int, body []byte) error {
 
 	switch status {
 	case http.StatusUnauthorized, http.StatusForbidden:
-		return fmt.Errorf("%s: authentication failed (HTTP %d): %s\n\n"+
+		return fmt.Sprintf("%s: authentication failed (HTTP %d): %s\n\n"+
 			"Check that %s holds a valid %s key, or set SENSEI_PROVIDER to the provider it belongs to",
 			t.provider, status, detail, t.cfg.KeyVar, t.provider)
 	case http.StatusNotFound:
-		return fmt.Errorf("%s: model %q not found (HTTP %d): %s\n\n"+
+		return fmt.Sprintf("%s: model %q not found (HTTP %d): %s\n\n"+
 			"Check SENSEI_MODEL, or unset it to use the default",
 			t.provider, t.cfg.Model, status, detail)
 	case http.StatusTooManyRequests:
-		return fmt.Errorf("%s: rate limit or quota exceeded (HTTP %d): %s\n\n"+
+		return fmt.Sprintf("%s: rate limit or quota exceeded (HTTP %d): %s\n\n"+
 			"Wait a moment and try again, or check your billing/usage limits",
 			t.provider, status, detail)
 	default:
 		if status >= 500 {
-			return fmt.Errorf("%s: provider is unavailable (HTTP %d): %s\n\n"+
+			return fmt.Sprintf("%s: provider is unavailable (HTTP %d): %s\n\n"+
 				"This is on the provider's side — try again shortly",
 				t.provider, status, detail)
 		}
-		return fmt.Errorf("%s: API error (HTTP %d): %s", t.provider, status, detail)
+		return fmt.Sprintf("%s: API error (HTTP %d): %s", t.provider, status, detail)
 	}
 }
 

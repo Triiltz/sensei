@@ -1,0 +1,11 @@
+=== RUN   TestParseConfig
+--- PASS: TestParseConfig (0.00s)
+=== RUN   TestParseDate
+    date_test.go:27: ParseDate("2026-02-30") = 2026-03-02, want an error for an invalid day
+--- FAIL: TestParseDate (0.00s)
+=== RUN   TestFormatSize
+--- PASS: TestFormatSize (0.00s)
+=== RUN   TestRetryBackoff
+--- PASS: TestRetryBackoff (0.01s)
+FAIL
+FAIL	example.com/app/internal/util	0.014s

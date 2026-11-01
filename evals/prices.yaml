@@ -1,0 +1,7 @@
+# USD per 1M tokens (input / output), maintained by hand. Check the providers'
+# pricing pages before publishing results. On a free tier the actual cost is
+# $0; these are the list prices of the same model on a paid tier.
+gemini-2.5-flash-lite: {input: 0.10, output: 0.40}
+gemini-2.5-flash:      {input: 0.30, output: 2.50}
+gpt-6-luna:            {input: 0.10, output: 0.50}
+claude-haiku-5-5:      {input: 0.10, output: 0.50}

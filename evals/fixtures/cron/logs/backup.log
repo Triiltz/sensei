@@ -1,0 +1,4 @@
+2026-10-28 02:00:01 backup ok
+2026-10-29 02:00:01 backup ok
+/opt/app/backup.sh: 4: DEST: parameter not set
+/opt/app/backup.sh: 4: DEST: parameter not set

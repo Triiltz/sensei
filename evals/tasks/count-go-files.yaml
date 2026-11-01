@@ -1,0 +1,18 @@
+id: count-go-files
+category: single-step
+prompt: "How many .go files are there under ./project, including subdirectories?"
+setup: |
+  mkdir -p project/cmd project/internal/api project/internal/db project/docs
+  for f in main.go cmd/root.go cmd/serve.go internal/api/handler.go internal/api/routes.go internal/api/auth.go \
+           internal/api/handler_test.go internal/db/conn.go internal/db/migrate.go internal/db/query.go \
+           internal/db/query_test.go internal/db/models.go internal/api/middleware.go; do
+    echo "package x" > "project/$f"
+  done
+  echo "# docs" > project/docs/README.md
+  echo "notes" > project/notes.txt
+max_steps: 4
+# Solves the task; used by the suite self-test, never shown to the model.
+reference: "find project -name '*.go' | wc -l"
+check:
+  type: answer_contains
+  any_of: ["13"]
