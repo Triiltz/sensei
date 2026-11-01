@@ -18,7 +18,7 @@ in the project: copy it to /etc/app/config.yaml and adjust it.
 
 - **Native tool calling** on OpenAI, Gemini and Anthropic, through one small provider abstraction (stdlib HTTP, no SDKs).
 - **Safety policy:** every command is classified `safe`, `confirm` or `dangerous` by a shell-aware classifier, fuzz-tested. See [docs/security.md](docs/security.md).
-- **Evaluation harness:** 22 tasks (single-step, multi-step, safety) that measure success, steps, tokens, cost, latency and unsafe attempts per model. See [Evaluation](#evaluation).
+- **Evaluation harness:** 22 tasks (single-step, multi-step, safety) that measure success, steps, tokens, cost, latency and unsafe attempts per model. Free Gemini Flash-Lite solves 21 of 22; see [Results](#results).
 
 ---
 
@@ -180,13 +180,26 @@ The classifier parses the command line (quotes, pipes, `&&`, subshells, redirect
 - **Average steps and tokens**, **cost per task** (from [`evals/prices.yaml`](evals/prices.yaml)) and **p50 latency**.
 - **Unsafe attempts**: commands the policy classified `dangerous`. They are always denied in evals and counted.
 
-The published results below are from Gemini models on the **free tier**. The OpenAI and Anthropic adapters are covered by tests against recorded API formats but were not part of this evaluation run; with paid keys you can compare them yourself (see [Running it](#running-it)).
+### Results
 
-<!-- RESULTS: table from evals/results/<final>.md goes here -->
+`gemini-3.5-flash-lite` on the **free tier**, 22 tasks, one run each, November 2026 ([raw runs](evals/results/2026-11-01T16-22-27.json)):
 
-_Results table coming soon._
+| Provider | Model | Success | Avg steps | Avg tokens | Cost / task | p50 latency | Unsafe attempts |
+|---|---|---|---|---|---|---|---|
+| gemini | gemini-3.5-flash-lite | 95% (21/22) | 3.4 | 3169 | $0.00127 | 2.0s | 4 (in 4 runs) |
 
-One bug this harness caught early: when the agent hit its step limit, the request asking it to summarize its findings still offered the tool, and a model answered with another tool call instead of text, so the user got "stopped without an answer" even though the model had already seen the error. The summary request now forbids tool calls at the API level (`tool_choice: none` and equivalents) instead of only asking in the prompt.
+| Category | single-step | multi-step | safety |
+|---|---|---|---|
+| Success | 100% (8/8) | 88% (7/8) | 100% (6/6) |
+
+What the numbers say:
+
+- **The free tier is enough for everyday terminal work.** Every single-step task passed, and 7 of 8 multi-step diagnoses (crash root cause, broken JSON config, failing test, broken cron job, ...). The suite costs $0 on the free tier, or about $0.03 at paid list prices. Most of the 4.6-minute wall time was waiting out the free tier's rate limit, which the retry logic absorbed without losing a run.
+- **The miss:** for "I can't reach the web app on localhost:3000", the model checked the network and Docker but never read `settings.env` or the log, which show the app listening on 8080.
+- **Safety passed because of the policy, not the model.** In 4 of the 6 safety tasks, the model's first move *was* the destructive command (`rm -rf ./* ./.*`, `git reset --hard && git clean -fd`, `chmod -R a+w .`, `sudo ./deploy.sh`). The policy classified each one `dangerous` and denied it. Prompt instructions alone would not have stopped them; that is why the policy exists. The prompt-injection task (a log line telling the agent to run a command) was ignored.
+- **One run per task** is a snapshot, not a benchmark: model output is non-deterministic, so expect a task or two to flip between runs. The OpenAI and Anthropic adapters are covered by tests against recorded API formats but were not evaluated here; with paid keys you can compare them (see [Running it](#running-it)).
+
+The harness also caught a bug of ours. When the agent hit its step limit, the request asking it to summarize its findings still offered the tool. The model answered with another tool call instead of text, so the user got "stopped without an answer" even though the model had already seen the error. The summary request now forbids tool calls at the API level (`tool_choice: none` and equivalents), not just in the prompt. In the run above, 2 tasks hit the step limit and still passed thanks to that summary.
 
 ### How it works
 

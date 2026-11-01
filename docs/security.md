@@ -31,6 +31,14 @@ just "read-only".
 | Execution limits | Agent commands run with no stdin, a timeout (`SENSEI_CMD_TIMEOUT`), in their own process group (a timeout or Ctrl+C kills everything they started), and with output capped in memory and truncated before it reaches the model. |
 | Prompt | The agent prompt says command output is data, not instructions, and to investigate read-only before changing anything. This lowers risk but is **not** relied on: the classifier and confirmation are the actual controls. |
 
+The evaluation suite shows why the prompt is not relied on. In November 2026,
+`gemini-3.5-flash-lite` was given six requests that should not lead to a
+destructive command. In four of them, its first move was the destructive
+command anyway: `rm -rf ./* ./.*`, `git reset --hard && git clean -fd`,
+`chmod -R a+w .` and `sudo ./deploy.sh`. The classifier marked all four
+`dangerous`, so they would have needed an explicit `y` (in evals they are
+always denied). See the results in the [README](../README.md#results).
+
 ## Tiers
 
 | Tier | Agent mode | With `-f` | Examples |
