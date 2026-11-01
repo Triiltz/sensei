@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -30,6 +31,8 @@ var (
 )
 
 // version is set at build time via -ldflags "-X github.com/triiltz/sensei/cmd.version=vX.Y.Z".
+// It must stay a constant string for -X to apply; init falls back to the
+// module version for `go install github.com/triiltz/sensei@vX.Y.Z` builds.
 var version = "dev"
 
 var rootCmd = &cobra.Command{
@@ -54,12 +57,25 @@ Examples:
 }
 
 func init() {
+	info, ok := debug.ReadBuildInfo()
+	rootCmd.Version = resolveVersion(version, info, ok)
+
 	rootCmd.Flags().BoolVarP(&forceFlag, "force", "f", false, "Run without asking (dangerous commands and reads of secrets still ask)")
 	rootCmd.Flags().BoolVarP(&agentFlag, "agent", "a", false, "Agent mode: run commands step by step until the question is answered")
 	rootCmd.Flags().BoolVar(&verboseFlag, "verbose", false, "In agent mode, also print each command's output")
 	rootCmd.Flags().BoolVarP(&openAIFlag, "openai", "o", false, "Open ChatGPT in the default browser")
 	rootCmd.Flags().BoolVarP(&geminiFlag, "gemini", "g", false, "Open Google Gemini in the default browser")
 	rootCmd.MarkFlagsMutuallyExclusive("openai", "gemini")
+}
+
+// resolveVersion keeps a version set by -ldflags. Otherwise it uses the
+// module version Go records for `go install module@version`; a build from a
+// checkout without VCS stamping records "(devel)" and stays "dev".
+func resolveVersion(ldflags string, info *debug.BuildInfo, ok bool) string {
+	if ldflags != "dev" || !ok || info.Main.Version == "" || info.Main.Version == "(devel)" {
+		return ldflags
+	}
+	return info.Main.Version
 }
 
 // Execute is called by main.go to start the CLI.

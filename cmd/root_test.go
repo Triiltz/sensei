@@ -3,8 +3,31 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"testing"
 )
+
+func TestResolveVersion(t *testing.T) {
+	built := func(v string) *debug.BuildInfo { return &debug.BuildInfo{Main: debug.Module{Version: v}} }
+	tests := []struct {
+		name, ldflags string
+		info          *debug.BuildInfo
+		ok            bool
+		want          string
+	}{
+		{"ldflags wins", "v1.1.0", built("v1.0.0"), true, "v1.1.0"},
+		{"go install @version", "dev", built("v1.1.0"), true, "v1.1.0"},
+		{"local build", "dev", built("(devel)"), true, "dev"},
+		{"no build info", "dev", nil, false, "dev"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveVersion(tt.ldflags, tt.info, tt.ok); got != tt.want {
+				t.Errorf("resolveVersion = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestReadPipe(t *testing.T) {
 	pipe := func(data string) *os.File {
