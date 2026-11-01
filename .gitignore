@@ -7,3 +7,9 @@ sensei
 
 # OS
 .DS_Store
+
+# Local notes and plans (never published)
+notes/
+
+# Release build output
+dist/
