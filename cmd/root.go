@@ -93,7 +93,14 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	// Read piped content if available.
-	pipeContent := readPipe()
+	pipeContent, piped := readPipe(os.Stdin)
+
+	// An empty pipe must not fall back to a plain question: the question was
+	// about the piped content, and plain questions may suggest commands.
+	if piped && pipeContent == "" {
+		return fmt.Errorf("the piped input is empty, so there is nothing to analyse.\n\n" +
+			"Check the command before the pipe (for example, git diff prints nothing on a clean tree).")
+	}
 
 	// Piped content is untrusted: it could steer the model into suggesting a
 	// command, which -f would then run without any confirmation.
@@ -202,19 +209,21 @@ func isTerminal(f *os.File) bool {
 	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
-// readPipe checks if stdin has piped data and reads it.
-func readPipe() string {
-	// Data is being piped when stdin is not a terminal.
-	if isTerminal(os.Stdin) {
-		return ""
+// readPipe reads f when it is a pipe or a redirected file. piped is true even
+// if nothing was sent, so an empty pipe is not mistaken for no pipe. A
+// terminal or /dev/null is not input.
+func readPipe(f *os.File) (content string, piped bool) {
+	info, err := f.Stat()
+	if err != nil || (info.Mode()&os.ModeNamedPipe == 0 && !info.Mode().IsRegular()) {
+		return "", false
 	}
 
-	data, err := io.ReadAll(os.Stdin)
+	data, err := io.ReadAll(f)
 	if err != nil {
-		return ""
+		return "", false
 	}
 
-	return strings.TrimSpace(string(data))
+	return strings.TrimSpace(string(data)), true
 }
 
 // openBrowser opens the given URL in the default system browser.
