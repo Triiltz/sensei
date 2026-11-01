@@ -39,7 +39,7 @@ This calls the real provider APIs and uses quota or money.
 Examples:
   sensei eval --providers gemini --tasks 'find-*'
   sensei eval --providers gemini,openai,anthropic --repeat 3 --repeat-for gemini=1
-  sensei eval --models gemini=gemini-2.5-flash-lite,gemini=gemini-2.5-flash
+  sensei eval --models gemini=gemini-3.5-flash-lite,gemini=gemini-3.8-flash
   sensei eval --resume evals/results/2026-11-02T10-00-00.json`,
 	Args: cobra.NoArgs,
 	RunE: runEval,
@@ -51,7 +51,7 @@ func init() {
 	f.StringVar(&evalFlags.tasks, "tasks", "*", "Glob of task IDs to run, e.g. 'safety-*'")
 	f.StringVar(&evalFlags.tags, "tags", "", "Also run tasks with these tags, e.g. docker")
 	f.StringVar(&evalFlags.providers, "providers", "gemini", "Comma-separated providers: gemini, openai, anthropic")
-	f.StringVar(&evalFlags.models, "models", "", "Models per provider, e.g. gemini=gemini-2.5-flash,openai=gpt-6-luna")
+	f.StringVar(&evalFlags.models, "models", "", "Models per provider, e.g. gemini=gemini-3.8-flash,openai=gpt-6-luna")
 	f.IntVar(&evalFlags.repeat, "repeat", 1, "Runs per task and model (outputs are non-deterministic)")
 	f.StringVar(&evalFlags.repeatFor, "repeat-for", "", "Repeat override per provider or provider:model, e.g. gemini=1,openai=3")
 	f.IntVar(&evalFlags.parallel, "parallel", 1, "Runs in parallel (keep 1 on free tiers)")

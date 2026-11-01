@@ -3,6 +3,7 @@ package eval
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -60,7 +61,9 @@ type job struct {
 
 // RunAll executes every (target, task, repeat) that is not already done in
 // opts.Results. When a target runs out of quota, its remaining runs are
-// skipped so a later --resume can pick them up.
+// skipped so a later --resume can pick them up. When a target's key or model
+// is rejected, its remaining runs are skipped too, nothing is recorded for
+// it, and RunAll returns the error.
 func RunAll(ctx context.Context, opts Options) error {
 	if opts.Results == nil {
 		opts.Results = &Results{CreatedAt: time.Now().UTC()}
@@ -106,31 +109,43 @@ func RunAll(ctx context.Context, opts Options) error {
 	}
 
 	var (
-		mu        sync.Mutex
-		exhausted = map[string]bool{}
-		saveErr   error
-		wg        sync.WaitGroup
-		queue     = make(chan job)
+		mu         sync.Mutex
+		stopped    = map[string]bool{} // targets out of quota or misconfigured
+		configErrs []error
+		saveErr    error
+		wg         sync.WaitGroup
+		queue      = make(chan job)
 	)
 
 	worker := func() {
 		defer wg.Done()
 		for j := range queue {
 			mu.Lock()
-			skip := exhausted[j.target.String()]
+			skip := stopped[j.target.String()]
 			mu.Unlock()
 			if skip || ctx.Err() != nil {
 				continue
 			}
 
-			run := runOne(ctx, opts, providers[j.target.String()], j)
+			run, configErr := runOne(ctx, opts, providers[j.target.String()], j)
 			if ctx.Err() != nil {
 				continue // interrupted: leave it for --resume
 			}
 
 			mu.Lock()
-			if run.Status == StatusQuota && !exhausted[j.target.String()] {
-				exhausted[j.target.String()] = true
+			if configErr != nil {
+				// Not recorded: the model never saw the task, so --resume
+				// retries it once the key or model is fixed.
+				if !stopped[j.target.String()] {
+					stopped[j.target.String()] = true
+					configErrs = append(configErrs, fmt.Errorf("%s: %w", j.target, configErr))
+					fmt.Fprintf(opts.Log, "%s: %s\n  skipping its remaining runs\n", j.target, firstLine(configErr.Error()))
+				}
+				mu.Unlock()
+				continue
+			}
+			if run.Status == StatusQuota && !stopped[j.target.String()] {
+				stopped[j.target.String()] = true
 				fmt.Fprintf(opts.Log, "%s: quota exhausted, skipping its remaining runs (use --resume later)\n", j.target)
 			}
 			opts.Results.upsert(run)
@@ -158,7 +173,10 @@ func RunAll(ctx context.Context, opts Options) error {
 	if err := opts.Results.save(opts.OutPath); err != nil {
 		return fmt.Errorf("saving results: %w", err)
 	}
-	return ctx.Err()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return errors.Join(configErrs...)
 }
 
 func maxRepeat(targets []Target) int {
@@ -169,9 +187,10 @@ func maxRepeat(targets []Target) int {
 	return n
 }
 
-// runOne runs a task once in a fresh temporary directory.
-func runOne(ctx context.Context, opts Options, provider llm.Provider, j job) Run {
-	run := Run{
+// runOne runs a task once in a fresh temporary directory. configErr is set
+// when the provider rejected the key or model; run is then meaningless.
+func runOne(ctx context.Context, opts Options, provider llm.Provider, j job) (run Run, configErr error) {
+	run = Run{
 		TaskID:    j.task.ID,
 		Category:  j.task.Category,
 		Provider:  string(j.target.Provider),
@@ -184,7 +203,7 @@ func runOne(ctx context.Context, opts Options, provider llm.Provider, j job) Run
 
 	work, sandbox, cleanup, err := prepare(ctx, opts.Root, j.task)
 	if err != nil {
-		return failed(run, err)
+		return failed(run, err), nil
 	}
 	defer cleanup()
 
@@ -228,6 +247,8 @@ func runOne(ctx context.Context, opts Options, provider llm.Provider, j job) Run
 	}
 
 	switch {
+	case err != nil && llm.IsConfigError(err):
+		return run, err
 	case err != nil && llm.IsRateLimited(err):
 		run.Status, run.Detail = StatusQuota, firstLine(err.Error())
 	case err != nil:
@@ -239,7 +260,7 @@ func runOne(ctx context.Context, opts Options, provider llm.Provider, j job) Run
 			run.Status = StatusPass
 		}
 	}
-	return run
+	return run, nil
 }
 
 // prepare creates the task's temporary directory: the fixture copied into

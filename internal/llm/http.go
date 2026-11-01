@@ -192,6 +192,21 @@ func IsRateLimited(err error) bool {
 	return errors.As(err, &se) && se.Code == http.StatusTooManyRequests
 }
 
+// IsConfigError reports whether err means no request with this key and model
+// can succeed: the key is rejected (401, 403) or the model does not exist or
+// is not available to this account (404).
+func IsConfigError(err error) bool {
+	var se *StatusError
+	if !errors.As(err, &se) {
+		return false
+	}
+	switch se.Code {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+		return true
+	}
+	return false
+}
+
 // apiErrorBody covers the error envelope used by all three providers.
 type apiErrorBody struct {
 	Error *struct {

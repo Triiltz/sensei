@@ -15,28 +15,28 @@ func TestParseTargets(t *testing.T) {
 	}{
 		{
 			name: "default models", providers: "gemini,openai", repeat: 1,
-			want: "gemini/gemini-2.5-flash-lite×1 openai/gpt-6-luna×1",
+			want: "gemini/gemini-3.5-flash-lite×1 openai/gpt-6-luna×1",
 		},
 		{
 			name: "several models for one provider", providers: "gemini", repeat: 1,
-			models: "gemini=gemini-2.5-flash-lite,gemini=gemini-2.5-flash",
-			want:   "gemini/gemini-2.5-flash-lite×1 gemini/gemini-2.5-flash×1",
+			models: "gemini=gemini-3.5-flash-lite,gemini=gemini-3.8-flash",
+			want:   "gemini/gemini-3.5-flash-lite×1 gemini/gemini-3.8-flash×1",
 		},
 		{
 			name: "free tier once, paid three times", providers: "gemini,openai,anthropic", repeat: 3,
 			repeatFor: "gemini=1",
-			want:      "gemini/gemini-2.5-flash-lite×1 openai/gpt-6-luna×3 anthropic/claude-haiku-5-5×3",
+			want:      "gemini/gemini-3.5-flash-lite×1 openai/gpt-6-luna×3 anthropic/claude-haiku-5-5×3",
 		},
 		{
 			name: "model-specific repeat wins", providers: "gemini", repeat: 1,
-			models:    "gemini=gemini-2.5-flash-lite,gemini=gemini-2.5-flash",
-			repeatFor: "gemini=2,gemini:gemini-2.5-flash=1",
-			want:      "gemini/gemini-2.5-flash-lite×2 gemini/gemini-2.5-flash×1",
+			models:    "gemini=gemini-3.5-flash-lite,gemini=gemini-3.8-flash",
+			repeatFor: "gemini=2,gemini:gemini-3.8-flash=1",
+			want:      "gemini/gemini-3.5-flash-lite×2 gemini/gemini-3.8-flash×1",
 		},
 		{
 			name: "--models adds its provider", providers: "gemini", repeat: 1,
 			models: "anthropic=claude-haiku-5-5",
-			want:   "gemini/gemini-2.5-flash-lite×1 anthropic/claude-haiku-5-5×1",
+			want:   "gemini/gemini-3.5-flash-lite×1 anthropic/claude-haiku-5-5×1",
 		},
 		{name: "unknown provider", providers: "mistral", repeat: 1, wantErr: "unknown provider"},
 		{name: "bad models entry", providers: "gemini", models: "flash", repeat: 1, wantErr: "provider=model"},

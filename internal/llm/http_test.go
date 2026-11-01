@@ -249,3 +249,14 @@ func TestIsRateLimited(t *testing.T) {
 		t.Errorf("a 400 is not a rate limit: %v", err)
 	}
 }
+
+func TestIsConfigError(t *testing.T) {
+	for code, want := range map[int]bool{401: true, 403: true, 404: true, 400: false, 429: false, 500: false} {
+		ts, _ := newServer(t, fakeResp{status: code, body: `{"error":{"message":"x"}}`}, fakeResp{status: code, body: `{"error":{"message":"x"}}`},
+			fakeResp{status: code, body: `{"error":{"message":"x"}}`}, fakeResp{status: code, body: `{"error":{"message":"x"}}`})
+		_, err := newTestOpenAI(ts, &sleeps{}).Chat(context.Background(), Request{Messages: []Message{{Role: RoleUser, Content: "hi"}}})
+		if got := IsConfigError(fmt.Errorf("agent: %w", err)); got != want {
+			t.Errorf("HTTP %d: IsConfigError = %v, want %v", code, got, want)
+		}
+	}
+}

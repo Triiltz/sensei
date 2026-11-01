@@ -87,18 +87,19 @@ By default, SENSEI uses models optimized for speed and cost:
 | Provider | Default model |
 |----------|--------------|
 | OpenAI | `gpt-6-luna` |
-| Gemini | `gemini-2.5-flash-lite` |
+| Gemini | `gemini-3.5-flash-lite` |
 | Anthropic | `claude-haiku-5-5` |
 
 Gemini defaults to Flash-Lite because it has the most generous free-tier quota.
 Free-tier limits are per model and per project, and they change over time: in
-November 2026 `gemini-2.5-flash` allowed only 5 requests per minute and 20 per
-day. Check your current limits in [Google AI Studio](https://aistudio.google.com/rate-limit).
+November 2026 Gemini Flash allowed only 5 requests per minute and 20 per day.
+Check your current limits in [Google AI Studio](https://aistudio.google.com/rate-limit).
+The older `gemini-2.5-*` models only work for accounts that used them before.
 
 To use a different model:
 
 ```bash
-export SENSEI_MODEL="gemini-2.5-flash"  # Gemini Flash (smarter, much lower free quota)
+export SENSEI_MODEL="gemini-3.8-flash"  # Gemini Flash (smarter, much lower free quota)
 export SENSEI_MODEL="gpt-6-astra"       # OpenAI
 ```
 

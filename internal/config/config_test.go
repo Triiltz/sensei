@@ -34,7 +34,7 @@ func TestLoad(t *testing.T) {
 			wantProvider: ProviderGemini,
 			wantKey:      "AIza-test",
 			wantKeyVar:   "SENSEI_API_KEY",
-			wantModel:    "gemini-2.5-flash-lite",
+			wantModel:    "gemini-3.5-flash-lite",
 		},
 		{
 			name:         "explicit provider trusts a key with an unknown prefix",
@@ -42,7 +42,7 @@ func TestLoad(t *testing.T) {
 			wantProvider: ProviderGemini,
 			wantKey:      "custom-key",
 			wantKeyVar:   "SENSEI_API_KEY",
-			wantModel:    "gemini-2.5-flash-lite",
+			wantModel:    "gemini-3.5-flash-lite",
 		},
 		{
 			name:         "provider is case-insensitive",
@@ -103,7 +103,7 @@ func TestLoad(t *testing.T) {
 			wantProvider: ProviderGemini,
 			wantKey:      "AIzaSyTest",
 			wantKeyVar:   "SENSEI_API_KEY",
-			wantModel:    "gemini-2.5-flash-lite",
+			wantModel:    "gemini-3.5-flash-lite",
 		},
 		{
 			name:         "sk-ant- is anthropic, not openai",
@@ -141,7 +141,7 @@ func TestLoad(t *testing.T) {
 			wantProvider: ProviderGemini,
 			wantKey:      "AIza-test",
 			wantKeyVar:   "GEMINI_API_KEY",
-			wantModel:    "gemini-2.5-flash-lite",
+			wantModel:    "gemini-3.5-flash-lite",
 		},
 		{
 			name: "openai key wins over anthropic",
@@ -264,7 +264,7 @@ func TestLoadFor(t *testing.T) {
 	t.Setenv("SENSEI_MODEL", "ignored-by-LoadFor")
 
 	cfg, err := LoadFor(ProviderGemini, "")
-	if err != nil || cfg.APIKey != "AIza-gemini" || cfg.Model != "gemini-2.5-flash-lite" {
+	if err != nil || cfg.APIKey != "AIza-gemini" || cfg.Model != "gemini-3.5-flash-lite" {
 		t.Errorf("LoadFor(gemini) = %+v, %v", cfg, err)
 	}
 

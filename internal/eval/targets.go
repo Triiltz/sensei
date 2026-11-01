@@ -12,7 +12,7 @@ import (
 // ParseTargets builds the list of models to evaluate from the CLI flags.
 //
 //	providers: "gemini,openai"
-//	models:    "gemini=gemini-2.5-flash-lite,gemini=gemini-2.5-flash" (a provider may appear
+//	models:    "gemini=gemini-3.5-flash-lite,gemini=gemini-3.8-flash" (a provider may appear
 //	           several times; providers without an entry use their default model)
 //	repeat:    default repeats per task
 //	repeatFor: "gemini=1,openai=3,anthropic:claude-haiku-5-5=3" (provider or

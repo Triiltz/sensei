@@ -18,12 +18,12 @@ const (
 )
 
 // Default models: the cheap/fast tier of each provider. The Gemini default
-// must stay on a model that is available on the free tier, and Flash-Lite has
-// the most generous free-tier quota (Flash allowed only 20 requests a day in
-// November 2026). Flash stays available via SENSEI_MODEL=gemini-2.5-flash.
+// must be on the free tier and open to new accounts (the 2.5 models answer
+// 404 to keys that never used them). Flash-Lite has the most generous
+// free-tier quota; Flash stays available via SENSEI_MODEL=gemini-3.8-flash.
 var defaultModels = map[Provider]string{
 	ProviderOpenAI:    "gpt-6-luna",
-	ProviderGemini:    "gemini-2.5-flash-lite",
+	ProviderGemini:    "gemini-3.5-flash-lite",
 	ProviderAnthropic: "claude-haiku-5-5",
 }
 

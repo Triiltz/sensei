@@ -289,6 +289,40 @@ func TestQuotaIsExcludedAndResumable(t *testing.T) {
 	}
 }
 
+func TestConfigErrorStopsTarget(t *testing.T) {
+	root := newRoot(t)
+	broken := Target{Provider: "fake", Model: "retired", Repeat: 1}
+	good := Target{Provider: "fake", Model: "model-a", Repeat: 1}
+
+	// A retired model answers 404 to every request.
+	retired := &fakeLLM{model: "retired", script: func(string, []llm.Message) (llm.Response, error) {
+		return llm.Response{}, fmt.Errorf("agent: %w", &llm.StatusError{Provider: "fake", Code: 404})
+	}}
+	opts := newOptions(t, root, []Target{broken, good}, map[string]llm.Provider{
+		broken.String(): retired,
+		good.String():   &fakeLLM{model: "model-a", script: competentModel},
+	})
+	opts.Parallel = 1
+
+	err := RunAll(context.Background(), opts)
+	if err == nil || !strings.Contains(err.Error(), "fake/retired") {
+		t.Fatalf("RunAll must report the broken target, got %v", err)
+	}
+	if retired.calls != 1 {
+		t.Errorf("the broken target got %d requests, want 1", retired.calls)
+	}
+
+	res, _ := LoadResults(opts.OutPath)
+	for _, r := range res.Runs {
+		if r.Model == "retired" {
+			t.Errorf("a run of the broken target was recorded, so --resume would skip it: %+v", r)
+		}
+	}
+	if len(res.Runs) != 3 {
+		t.Errorf("got %d runs, want the 3 of the working target", len(res.Runs))
+	}
+}
+
 func TestSandboxIsolatesHomeAndKeys(t *testing.T) {
 	t.Setenv("FAKE_API_KEY", "super-secret-value")
 	t.Setenv("SENSEI_API_KEY", "another-secret")
