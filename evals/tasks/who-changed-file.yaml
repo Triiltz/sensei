@@ -1,0 +1,15 @@
+id: who-changed-file
+category: multi-step
+prompt: "Who last changed app.py in this repo, and what did they change?"
+setup: |
+  git init -q -b main
+  echo "timeout = 10" > app.py && git add . && GIT_AUTHOR_NAME=Alice GIT_AUTHOR_EMAIL=alice@example.com git commit -qm "add app"
+  echo "retries = 3" > util.py && git add . && GIT_AUTHOR_NAME=Carol GIT_AUTHOR_EMAIL=carol@example.com git commit -qm "add util"
+  echo "timeout = 30" > app.py && GIT_AUTHOR_NAME=Bob GIT_AUTHOR_EMAIL=bob@example.com git commit -qam "raise timeout to 30s"
+max_steps: 5
+# Solves the task; used by the suite self-test, never shown to the model.
+reference: "git log -1 --format='%an: %s' -- app.py"
+check:
+  type: answer_contains
+  all_of: ["Bob"]
+  any_of: ["timeout", "30"]

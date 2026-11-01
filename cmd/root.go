@@ -1,30 +1,38 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/briandowns/spinner"
 	"github.com/spf13/cobra"
-	"github.com/triiltz/sensei/internal/ai"
+	"github.com/triiltz/sensei/internal/agent"
 	"github.com/triiltz/sensei/internal/config"
 	"github.com/triiltz/sensei/internal/executor"
+	"github.com/triiltz/sensei/internal/llm"
 )
 
 var (
-	forceFlag  bool
-	openAIFlag bool
-	geminiFlag bool
+	forceFlag   bool
+	openAIFlag  bool
+	geminiFlag  bool
+	agentFlag   bool
+	verboseFlag bool
 )
 
 // version is set at build time via -ldflags "-X github.com/triiltz/sensei/cmd.version=vX.Y.Z".
+// It must stay a constant string for -X to apply; init falls back to the
+// module version for `go install github.com/triiltz/sensei@vX.Y.Z` builds.
 var version = "dev"
 
 var rootCmd = &cobra.Command{
@@ -36,24 +44,53 @@ Examples:
   sensei "how to untar a tar.gz?"
   cat script.sh | sensei "what does this do?"
   sensei -f "create a new git branch called feature/login"
+  sensei -a "why won't my container start?"   (agent: investigates step by step)
   sensei -o    (open ChatGPT in browser)
   sensei -g    (open Gemini in browser)`,
 	Version:       version,
 	SilenceUsage:  true,
 	SilenceErrors: true,
-	RunE:          run,
+	// Arbitrary args: the question is free text, and subcommands (eval) must
+	// not make cobra reject words it does not recognise.
+	Args: cobra.ArbitraryArgs,
+	RunE: run,
 }
 
 func init() {
-	rootCmd.Flags().BoolVarP(&forceFlag, "force", "f", false, "Execute the suggested command without confirmation")
+	info, ok := debug.ReadBuildInfo()
+	rootCmd.Version = resolveVersion(version, info, ok)
+
+	rootCmd.Flags().BoolVarP(&forceFlag, "force", "f", false, "Run without asking (dangerous commands and reads of secrets still ask)")
+	rootCmd.Flags().BoolVarP(&agentFlag, "agent", "a", false, "Agent mode: run commands step by step until the question is answered")
+	rootCmd.Flags().BoolVar(&verboseFlag, "verbose", false, "In agent mode, also print each command's output")
 	rootCmd.Flags().BoolVarP(&openAIFlag, "openai", "o", false, "Open ChatGPT in the default browser")
 	rootCmd.Flags().BoolVarP(&geminiFlag, "gemini", "g", false, "Open Google Gemini in the default browser")
 	rootCmd.MarkFlagsMutuallyExclusive("openai", "gemini")
 }
 
+// resolveVersion keeps a version set by -ldflags. Otherwise it uses the
+// module version Go records for `go install module@version`; a build from a
+// checkout without VCS stamping records "(devel)" and stays "dev".
+func resolveVersion(ldflags string, info *debug.BuildInfo, ok bool) string {
+	if ldflags != "dev" || !ok || info.Main.Version == "" || info.Main.Version == "(devel)" {
+		return ldflags
+	}
+	return info.Main.Version
+}
+
 // Execute is called by main.go to start the CLI.
+//
+// Ctrl+C cancels the context, which aborts the in-flight request, the
+// confirmation prompt or the running command, and exits with status 130.
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	err := rootCmd.ExecuteContext(ctx)
+	stop()
+
+	if errors.Is(err, context.Canceled) {
+		os.Exit(130)
+	}
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
@@ -72,14 +109,27 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	// Read piped content if available.
-	pipeContent := readPipe()
+	pipeContent, piped := readPipe(os.Stdin)
 
-	// Piped content is untrusted: it could steer the model into emitting a
-	// COMMAND= line, which -f would then run without any confirmation.
+	// An empty pipe must not fall back to a plain question: the question was
+	// about the piped content, and plain questions may suggest commands.
+	if piped && pipeContent == "" {
+		return fmt.Errorf("the piped input is empty, so there is nothing to analyse.\n\n" +
+			"Check the command before the pipe (for example, git diff prints nothing on a clean tree).")
+	}
+
+	// Piped content is untrusted: it could steer the model into suggesting a
+	// command, which -f would then run without any confirmation.
 	if pipeContent != "" && forceFlag {
 		return fmt.Errorf("-f cannot be used with piped input.\n\n" +
 			"Piped content is untrusted and could make the model suggest an unintended command.\n" +
 			"Run without -f and confirm the command yourself.")
+	}
+	// Pipe mode is analysis only, for the same reason.
+	if pipeContent != "" && agentFlag {
+		return fmt.Errorf("-a cannot be used with piped input.\n\n" +
+			"Pipe mode only analyses the content. To let SENSEI investigate a file, ask in agent mode:\n" +
+			"  sensei -a \"what is wrong in app.log?\"")
 	}
 
 	// Build the user prompt from arguments.
@@ -100,26 +150,57 @@ func run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Call the AI.
-	client := ai.NewClient(cfg)
+	provider, err := llm.New(cfg)
+	if err != nil {
+		return err
+	}
+
+	ctx := cmd.Context()
+
+	if agentFlag {
+		_, err := agent.Run(ctx, agent.Config{
+			Provider:   provider,
+			MaxSteps:   cfg.MaxSteps,
+			CmdTimeout: cfg.CmdTimeout,
+			Force:      forceFlag,
+			Verbose:    verboseFlag,
+			Out:        os.Stdout,
+			Log:        os.Stderr,
+			Color:      isTerminal(os.Stderr),
+			Thinking:   startSpinner,
+		}, userPrompt)
+		if err != nil && ctx.Err() == nil {
+			return fmt.Errorf("agent stopped: %w", err)
+		}
+		return err
+	}
 
 	stopSpinner := startSpinner()
-	response, err := client.Ask(userPrompt, pipeContent)
+	answer, err := agent.Ask(ctx, provider, userPrompt, pipeContent, warnf)
 	stopSpinner()
 
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return fmt.Errorf("AI request failed: %w", err)
 	}
 
-	// Parse the response and optionally execute the command.
-	return executor.Run(response, forceFlag)
+	// Print the answer and optionally run the suggested command.
+	return executor.Run(ctx, answer.Text, answer.Commands, forceFlag)
+}
+
+// warnf reports non-fatal notices (such as input truncation) on stderr.
+func warnf(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
 }
 
 // startSpinner shows a "Thinking..." spinner and returns a function that stops it.
 //
 // The spinner writes to stderr so that redirecting or piping stdout yields the
 // response alone, and it is skipped entirely when stderr is not a terminal.
-// A signal handler restores the cursor on Ctrl+C, which the spinner hides.
+// Ctrl+C cancels the request, so the caller always reaches stop, which
+// restores the cursor the spinner hides.
 func startSpinner() (stop func()) {
 	if !isTerminal(os.Stderr) {
 		return func() {}
@@ -132,29 +213,7 @@ func startSpinner() (stop func()) {
 	s.Suffix = " Thinking..."
 	s.Start()
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-sigCh:
-			s.Stop()
-			os.Exit(130)
-		case <-done:
-		}
-	}()
-
-	var once bool
-	return func() {
-		if once {
-			return
-		}
-		once = true
-		signal.Stop(sigCh)
-		close(done)
-		s.Stop()
-	}
+	return s.Stop
 }
 
 // isTerminal reports whether the given file is attached to a terminal.
@@ -166,19 +225,21 @@ func isTerminal(f *os.File) bool {
 	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
-// readPipe checks if stdin has piped data and reads it.
-func readPipe() string {
-	// Data is being piped when stdin is not a terminal.
-	if isTerminal(os.Stdin) {
-		return ""
+// readPipe reads f when it is a pipe or a redirected file. piped is true even
+// if nothing was sent, so an empty pipe is not mistaken for no pipe. A
+// terminal or /dev/null is not input.
+func readPipe(f *os.File) (content string, piped bool) {
+	info, err := f.Stat()
+	if err != nil || (info.Mode()&os.ModeNamedPipe == 0 && !info.Mode().IsRegular()) {
+		return "", false
 	}
 
-	data, err := io.ReadAll(os.Stdin)
+	data, err := io.ReadAll(f)
 	if err != nil {
-		return ""
+		return "", false
 	}
 
-	return strings.TrimSpace(string(data))
+	return strings.TrimSpace(string(data)), true
 }
 
 // openBrowser opens the given URL in the default system browser.

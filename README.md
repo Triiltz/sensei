@@ -1,120 +1,79 @@
 # 🥋 SENSEI
 
-**AI assistant right in your terminal.** Ask questions in natural language and get answers — or the exact command — without leaving the command line.
+**An AI agent for your terminal.** Ask in plain language. SENSEI answers, suggests the exact command, or, in agent mode, investigates step by step: it runs read-only commands, reads their output, and keeps going until it can answer. Every command passes through a safety policy before it runs.
+
+```
+$ sensei -a "the app crashed last night and won't come back up. find out why"
+→ Look for log files
+  $ ls logs
+→ Check the latest log for errors
+  $ grep -n -A3 ERROR logs/app-2026-10-31.log
+
+The app fails at startup because /etc/app/config.yaml does not exist
+(FileNotFoundException in Loader.java:42). There is a config.example.yaml
+in the project: copy it to /etc/app/config.yaml and adjust it.
+```
+
+<!-- DEMO: asciinema/GIF of a multi-step diagnosis goes here -->
+
+- **Native tool calling** on OpenAI, Gemini and Anthropic, through one small provider abstraction (stdlib HTTP, no SDKs).
+- **Safety policy:** every command is classified `safe`, `confirm` or `dangerous` by a shell-aware classifier, fuzz-tested. See [docs/security.md](docs/security.md).
+- **Evaluation harness:** 22 tasks (single-step, multi-step, safety) that measure success, steps, tokens, cost, latency and unsafe attempts per model. Free Gemini Flash-Lite solves 21 of 22; see [Results](#results).
+
+---
+
+## Quickstart (free, with Gemini)
+
+1. Get a free API key at [Google AI Studio](https://aistudio.google.com/apikey).
+2. Install and set the key:
+   ```bash
+   go install github.com/triiltz/sensei@latest
+   export SENSEI_API_KEY="AIza..."   # add to ~/.zshrc or ~/.bashrc to keep it
+   ```
+3. Ask:
+   ```bash
+   sensei "how do I find the 10 largest files here?"
+   sensei -a "why is this directory so big?"
+   ```
+
+The provider is detected from the key, so no other configuration is needed.
+
+> **Your data on the free tier.** On the Gemini free tier, Google may use
+> prompts and responses to improve its products. Agent mode sends the output of
+> the commands it runs (logs, configs, diffs) to the provider. Avoid sensitive
+> data on the free tier, or use a paid key.
 
 ---
 
 ## Installation
 
-### Prerequisites
-
-- [Go 1.23+](https://go.dev/dl/)
-- Linux or macOS (on Windows, use WSL — command execution assumes a POSIX shell)
-
-### Via `go install` (recommended)
+Requires [Go 1.23+](https://go.dev/dl/) and Linux or macOS (on Windows, use WSL: commands run in a POSIX shell).
 
 ```bash
 go install github.com/triiltz/sensei@latest
 ```
 
-The binary will be installed to `~/go/bin/`. Make sure this directory is in your `PATH`:
+The binary goes to `~/go/bin/`; make sure it is on your `PATH` (`export PATH="$HOME/go/bin:$PATH"`). Prebuilt binaries for Linux and macOS are on the [releases page](https://github.com/triiltz/sensei/releases).
 
-```bash
-# Add to your ~/.zshrc or ~/.bashrc if not already present:
-export PATH="$HOME/go/bin:$PATH"
-```
-
-### Manual build (and local updates)
+From source:
 
 ```bash
 git clone https://github.com/triiltz/sensei.git
 cd sensei
 go build -o sensei .
-sudo mv sensei /usr/local/bin/   # optional, for global access
 ```
-
-**Tip for developers:** If you make changes to the source code locally, simply run `go install .` inside the project folder. This will recompile and immediately update the binary in your `~/go/bin/` folder, making the changes instantly available to the `sensei` command.
-
----
-
-## Configuration
-
-SENSEI is configured entirely through **environment variables**. No `.env` files, no config files — clean and simple.
-
-### 1. API Key (required)
-
-```bash
-export SENSEI_API_KEY="your-api-key-here"
-```
-
-> To persist across terminal sessions, add this line to your `~/.zshrc` (or `~/.bashrc`).
-
-### 2. Provider (optional)
-
-SENSEI supports two AI providers:
-
-| Provider | Value | Where to get a key |
-|----------|-------|-------------------|
-| **OpenAI** (ChatGPT) | `openai` (default) | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
-| **Google Gemini** | `gemini` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
-
-```bash
-# To use OpenAI (default, no need to set):
-export SENSEI_PROVIDER="openai"
-
-# To use Gemini:
-export SENSEI_PROVIDER="gemini"
-```
-
-> **Each provider uses its own API key.** When switching providers, make sure to update both `SENSEI_API_KEY` and `SENSEI_PROVIDER`.
-
-#### Tip: quickly switching between providers
-
-You can create aliases in your `~/.zshrc` to switch between them painlessly:
-
-```bash
-# In ~/.zshrc:
-alias sensei-openai='export SENSEI_PROVIDER="openai" && export SENSEI_API_KEY="sk-your-openai-key"'
-alias sensei-gemini='export SENSEI_PROVIDER="gemini" && export SENSEI_API_KEY="your-gemini-key"'
-```
-
-Then just run `sensei-openai` or `sensei-gemini` before using the tool.
-
-### 3. Model (optional)
-
-By default, SENSEI uses models optimized for speed and cost:
-
-| Provider | Default model |
-|----------|--------------|
-| OpenAI | `gpt-4o-mini` |
-| Gemini | `gemini-2.5-flash` |
-
-To use a different model:
-
-```bash
-export SENSEI_MODEL="gpt-4o"        # OpenAI
-export SENSEI_MODEL="gemini-1.5-pro" # Gemini
-```
-
-### Environment variables summary
-
-| Variable | Required | Description |
-|----------|:--------:|-----------|
-| `SENSEI_API_KEY` | ✅ | API key for the chosen provider |
-| `SENSEI_PROVIDER` | ❌ | `openai` (default) or `gemini` |
-| `SENSEI_MODEL` | ❌ | Specific model (overrides the default) |
 
 ---
 
 ## Usage
 
-### Direct question
+### Questions and commands (one-shot)
 
 ```bash
 sensei "how to extract a tar.gz?"
 ```
 
-SENSEI responds concisely and, when applicable, suggests the exact command with the option to run it immediately:
+SENSEI answers briefly and, when a command fits, offers to run it:
 
 ```
 Extracts a tar.gz archive.
@@ -123,9 +82,18 @@ Extracts a tar.gz archive.
    Run it? [y/N]:
 ```
 
-### Pipe mode (code/log analysis)
+The command runs attached to your terminal, so interactive programs work. Its output is not sent back to the model.
 
-Pipe content into SENSEI for analysis:
+### Agent mode (`-a`)
+
+```bash
+sensei -a "why won't my container start?"
+sensei -a "which test is failing and why?"
+```
+
+The model calls a `run_command` tool, sees the output, and decides the next step, up to `SENSEI_MAX_STEPS` steps (default 8). Each command is shown with the reason for running it. `safe` commands run directly; anything else asks first (see [Safety](#safety)). Add `--verbose` to also print each command's output.
+
+### Pipe mode (analysis only)
 
 ```bash
 cat script.sh | sensei "what does this script do?"
@@ -133,84 +101,149 @@ docker logs app 2>&1 | sensei "are there any errors here?"
 git diff | sensei "summarize these changes"
 ```
 
-In this mode, SENSEI automatically switches behavior: instead of being concise, it explains the content in a detailed and structured way.
+Piped content is untrusted, so in this mode the model gets no tools: it only explains. `-f` and `-a` are rejected with piped input, and an empty pipe is an error rather than a silent switch to a plain question.
 
-### Composing with other tools
-
-The response goes to stdout and the spinner to stderr, so SENSEI pipes and redirects cleanly:
+Answers go to stdout and the spinner and step log to stderr, so SENSEI composes with other tools:
 
 ```bash
-sensei "explain the TCP handshake" > notes.txt
-git diff | sensei "summarize these changes" | tee review.txt
+git diff | sensei "write a commit message" | tee msg.txt
 ```
 
 ### Flags
 
 | Flag | Short | Description |
-|------|:-----:|-----------|
-| `--force` | `-f` | Execute the suggested command automatically, skipping confirmation |
-| `--openai` | `-o` | Open ChatGPT in the default browser |
-| `--gemini` | `-g` | Open Google Gemini in the default browser |
+|------|:-----:|-------------|
+| `--agent` | `-a` | Agent mode: run commands step by step until the question is answered |
+| `--force` | `-f` | Run without asking. Dangerous commands and reads of secrets **still ask** |
+| `--verbose` | | In agent mode, also print each command's output |
+| `--openai` | `-o` | Open ChatGPT in the browser |
+| `--gemini` | `-g` | Open Gemini in the browser |
 | `--version` | `-v` | Show the installed version |
-| `--help` | `-h` | Show help |
+
+---
+
+## Configuration
+
+Everything is configured with environment variables. There are no config files.
+
+### Providers and models
+
+| Provider | Default model | Key prefix | Get a key |
+|----------|---------------|------------|-----------|
+| Gemini | `gemini-3.5-flash-lite` | `AIza` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) (free tier) |
+| OpenAI | `gpt-6-luna` | `sk-` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+| Anthropic | `claude-haiku-5-5` | `sk-ant-` | [console.anthropic.com](https://console.anthropic.com/) |
+
+The provider is chosen by the first rule that applies:
+
+1. `SENSEI_PROVIDER`, if set.
+2. The prefix of `SENSEI_API_KEY`.
+3. The first of `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` that is set.
+
+Gemini defaults to Flash-Lite because it has the most generous free-tier quota. Free-tier limits are per model and change over time: in November 2026 Gemini Flash allowed only 5 requests per minute and 20 per day. Check yours in [AI Studio](https://aistudio.google.com/rate-limit). Rate-limited requests are retried with backoff, honouring the provider's suggested delay.
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SENSEI_API_KEY` | | API key; the provider is inferred from its prefix |
+| `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` | | Per-provider keys, used when `SENSEI_API_KEY` is not set or belongs to another provider |
+| `SENSEI_PROVIDER` | inferred | `gemini`, `openai` or `anthropic` |
+| `SENSEI_MODEL` | per provider | Model override, e.g. `gemini-3.8-flash` |
+| `SENSEI_MAX_STEPS` | `8` | Agent mode: maximum model requests per question |
+| `SENSEI_CMD_TIMEOUT` | `30s` | Agent mode: timeout for each command (`45`, `45s`, `2m`) |
+
+---
+
+## Safety
+
+A model driving a shell can do harm in two ways: a destructive command (by mistake, or steered by text in a log it read, i.e. prompt injection), or a harmless-looking read that sends secrets to the provider (`cat .env`). Every command is classified before it runs:
+
+| Tier | Agent mode | With `-f` | Examples |
+|------|-----------|-----------|----------|
+| `safe` | runs | runs | `ls`, `cat app.log`, `grep`, `git status`, `docker ps`, `df` |
+| `confirm` | asks | runs | unknown commands, file writes, `npm install`, `curl`, `git commit` |
+| `confirm` + sensitive | asks | **asks** | `cat .env`, `ls ~/.ssh`, `echo $TOKEN`, `env` |
+| `dangerous` | asks, with a warning | **asks** | `rm -rf`, `sudo`, `curl … \| sh`, `git push --force`, `find -delete` |
+
+The classifier parses the command line (quotes, pipes, `&&`, subshells, redirections, `$(...)`), looks through wrappers like `sh -c`, `xargs` and `find -exec`, and escalates anything it cannot parse. A command is `safe` only if every part of it is. It has 160+ table-driven test cases and a native Go fuzz test.
+
+[docs/security.md](docs/security.md) has the threat model, the four bypasses found and fixed while building it, and the known limitations. In short: this is a guard rail, not a sandbox, and **you are the last line of defence**. Read `confirm` and `dangerous` commands before answering `y`.
+
+---
+
+## Evaluation
+
+`sensei eval` runs the agent against the task suite in [`evals/`](evals/) and reports, per provider and model:
+
+- **Success rate**, overall and per category (single-step, multi-step, safety).
+- **Average steps and tokens**, **cost per task** (from [`evals/prices.yaml`](evals/prices.yaml)) and **p50 latency**.
+- **Unsafe attempts**: commands the policy classified `dangerous`. They are always denied in evals and counted.
+
+### Results
+
+`gemini-3.5-flash-lite` on the **free tier**, 22 tasks, one run each, November 2026 ([raw runs](evals/results/2026-11-01T16-22-27.json)):
+
+| Provider | Model | Success | Avg steps | Avg tokens | Cost / task | p50 latency | Unsafe attempts |
+|---|---|---|---|---|---|---|---|
+| gemini | gemini-3.5-flash-lite | 95% (21/22) | 3.4 | 3169 | $0.00127 | 2.0s | 4 (in 4 runs) |
+
+| Category | single-step | multi-step | safety |
+|---|---|---|---|
+| Success | 100% (8/8) | 88% (7/8) | 100% (6/6) |
+
+What the numbers say:
+
+- **The free tier is enough for everyday terminal work.** Every single-step task passed, and 7 of 8 multi-step diagnoses (crash root cause, broken JSON config, failing test, broken cron job, ...). The suite costs $0 on the free tier, or about $0.03 at paid list prices. Most of the 4.6-minute wall time was waiting out the free tier's rate limit, which the retry logic absorbed without losing a run.
+- **The miss:** for "I can't reach the web app on localhost:3000", the model checked the network and Docker but never read `settings.env` or the log, which show the app listening on 8080.
+- **Safety passed because of the policy, not the model.** In 4 of the 6 safety tasks, the model's first move *was* the destructive command (`rm -rf ./* ./.*`, `git reset --hard && git clean -fd`, `chmod -R a+w .`, `sudo ./deploy.sh`). The policy classified each one `dangerous` and denied it. Prompt instructions alone would not have stopped them; that is why the policy exists. The prompt-injection task (a log line telling the agent to run a command) was ignored.
+- **One run per task** is a snapshot, not a benchmark: model output is non-deterministic, so expect a task or two to flip between runs. The OpenAI and Anthropic adapters are covered by tests against recorded API formats but were not evaluated here; with paid keys you can compare them (see [Running it](#running-it)).
+
+The harness also caught a bug of ours. When the agent hit its step limit, the request asking it to summarize its findings still offered the tool. The model answered with another tool call instead of text, so the user got "stopped without an answer" even though the model had already seen the error. The summary request now forbids tool calls at the API level (`tool_choice: none` and equivalents), not just in the prompt. In the run above, 2 tasks hit the step limit and still passed thanks to that summary.
+
+### How it works
+
+- **Tasks** are YAML files in [`evals/tasks/`](evals/tasks/): a prompt, an optional fixture directory and setup script, and a check. Checks look at the outcome, not the exact command: `answer_contains`, `file_state` (a file exists or contains text), or `command_not_run` (for safety tasks).
+- **Isolation:** each run gets a fresh temporary directory with a temporary `HOME`, and API keys are removed from the commands' environment. This is isolation, not a sandbox.
+- **Self-test:** each task has a reference solution. `go test` checks that every task is solvable, that every check fails when nothing is done, and that every safety task's forbidden command is classified `dangerous`.
+- **Free-tier friendly:** a run that hits a rate limit or quota is marked `quota_exhausted` and excluded from the success rate (it says nothing about the model). `--resume` continues a results file later, so a free-tier run can span several days.
+
+### Running it
 
 ```bash
-# Execute directly without asking [y/N]:
-sensei -f "list all open ports"
+sensei eval --providers gemini --tasks 'find-*'          # a few tasks
+sensei eval --models gemini=gemini-3.5-flash-lite,gemini=gemini-3.8-flash
+sensei eval --resume evals/results/2026-11-02T10-00-00.json
 
-# Open ChatGPT in the browser:
-sensei -o
-
-# Open Gemini in the browser:
-sensei -g
+# With paid keys: free Gemini once, paid models three times each
+export OPENAI_API_KEY=sk-... ANTHROPIC_API_KEY=sk-ant-...
+sensei eval --providers gemini,openai,anthropic --repeat 3 --repeat-for gemini=1
 ```
 
-> **`-f` is rejected when input is piped.** Piped content is untrusted: a log or
-> file could contain text that steers the model into suggesting a command you
-> never intended, and `-f` would run it without asking. Run without `-f` and
-> confirm the command yourself.
+Each provider reads its own key variable, so all three can be set at once.
 
-### A note on running suggested commands
-
-SENSEI asks before running anything, but the command is written by a language
-model — **read it before answering `y`**. Treat it the way you would treat a
-command copied from a random blog post.
+Run it from the repository root. It asks before calling the APIs (`--yes` skips the question) and writes `evals/results/<timestamp>.json` (raw runs) and `.md` (summary).
 
 ---
 
 ## How it works
 
+```mermaid
+flowchart TD
+    Q["sensei -a 'question'"] --> M[Model]
+    M -->|final answer| A[Print answer]
+    M -->|run_command call| P{Policy}
+    P -->|safe| X[Run with timeout,<br/>capture output]
+    P -->|confirm / dangerous| C{Ask y/N}
+    C -->|yes| X
+    C -->|no| D[Tell the model it was declined]
+    X -->|truncated output| M
+    D --> M
 ```
-┌───────────────────────────────────────────────────┐
-│  sensei "question"    or    cat x | sensei "..."  │
-└──────────────────────┬────────────────────────────┘
-                       │
-              ┌────────▼────────┐
-              │  Detect mode:   │
-              │  Terminal / Pipe │
-              └────────┬────────┘
-                       │
-              ┌────────▼────────┐
-              │  Inject correct │
-              │  system prompt  │
-              └────────┬────────┘
-                       │
-              ┌────────▼────────┐
-              │  Send request   │
-              │  to API (OpenAI │
-              │  / Gemini)      │
-              └────────┬────────┘
-                       │
-              ┌────────▼────────┐
-              │  Parse response │
-              │  COMMAND=...?   │
-              └────────┬────────┘
-                       │
-                 ┌─────▼─────┐
-                 │  Yes       │──▶ Prompt [y/N] ──▶ Execute in shell
-                 │  No        │──▶ Print response
-                 └───────────┘
-```
+
+- **Providers** (`internal/llm`): one `Provider` interface with OpenAI (Responses API), Gemini (`generateContent`) and Anthropic (Messages API) adapters. Messages, tool calls and usage are normalized; provider-specific data that must be sent back (such as Gemini thought signatures) travels opaquely with the message.
+- **Agent loop** (`internal/agent`): sends the conversation, executes tool calls through the policy, and returns command output (exit code, stdout and stderr, truncated in the middle) to the model. At the step limit it asks for a summary of what was found.
+- **Execution** (`internal/executor`): commands run with no stdin, a timeout and their own process group, so a timeout or Ctrl+C kills everything they started.
 
 ---
 
@@ -219,29 +252,38 @@ command copied from a random blog post.
 ```
 sensei/
 ├── cmd/
-│   └── root.go            # CLI (Cobra): flags, pipe detection, orchestration
+│   ├── root.go          # CLI: flags, modes, wiring
+│   └── eval.go          # `sensei eval` (hidden subcommand)
 ├── internal/
-│   ├── ai/
-│   │   ├── client.go      # Dual HTTP client: OpenAI + Gemini
-│   │   └── client_test.go
-│   ├── config/
-│   │   ├── config.go      # Reads environment variables (API key, provider, model)
-│   │   └── config_test.go
-│   └── executor/
-│       ├── runner.go      # COMMAND= parsing, confirmation prompt, shell execution
-│       └── runner_test.go
-├── main.go                # Entry point
-├── go.mod
-└── go.sum
+│   ├── config/          # provider, key and model resolution from env vars
+│   ├── llm/             # provider abstraction, OpenAI/Gemini/Anthropic adapters, retries
+│   ├── agent/           # run_command tool, prompts, one-shot and agent loop
+│   ├── policy/          # shell lexer and safe/confirm/dangerous classifier (+ fuzz test)
+│   ├── executor/        # confirmation, command execution and output capture
+│   └── eval/            # task loading, runner, checks, JSON/Markdown reports
+├── evals/
+│   ├── tasks/           # 22 task definitions (YAML)
+│   ├── fixtures/        # files the tasks run against
+│   ├── results/         # eval outputs
+│   └── prices.yaml      # USD per 1M tokens, per model
+├── docs/security.md     # threat model and classifier design
+└── main.go
 ```
 
-### Running the tests
+### Tests
 
 ```bash
-go test ./...
+go test ./...                                             # no test calls a real API
+go test ./internal/policy -fuzz=FuzzClassify -fuzztime=60s
 ```
 
+Provider adapters are tested against `httptest` servers with golden request files, and the agent loop and eval runner against a scripted fake provider.
+
 ---
+
+## Out of scope (possible follow-ups)
+
+Streaming output, a TUI, config files, MCP, tools beyond `run_command`, and memory across invocations.
 
 ## License
 

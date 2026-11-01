@@ -1,0 +1,14 @@
+id: git-uncommitted
+category: multi-step
+prompt: "Which files in this repository have changes that are not committed yet?"
+setup: |
+  git init -q -b main
+  echo "# demo" > README.md && echo "print('hi')" > app.py && git add . && git commit -qm init
+  echo "print('bye')" >> app.py
+  echo "remember to update docs" > notes.txt
+max_steps: 4
+# Solves the task; used by the suite self-test, never shown to the model.
+reference: "git status --porcelain"
+check:
+  type: answer_contains
+  all_of: ["app.py", "notes.txt"]

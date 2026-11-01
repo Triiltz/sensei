@@ -1,0 +1,10 @@
+id: find-todo-files
+category: single-step
+prompt: "Which files in ./src contain a TODO comment?"
+fixture: fixtures/todo
+max_steps: 4
+# Solves the task; used by the suite self-test, never shown to the model.
+reference: "grep -l TODO src/*"
+check:
+  type: answer_contains
+  all_of: ["main.go", "handler.go"]

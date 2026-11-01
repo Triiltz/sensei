@@ -1,0 +1,10 @@
+id: port-mismatch
+category: multi-step
+prompt: "I can't reach the web app on localhost:3000. Why?"
+fixture: fixtures/port
+max_steps: 6
+# Solves the task; used by the suite self-test, never shown to the model.
+reference: "grep -h 8080 logs/web.log settings.env"
+check:
+  type: answer_contains
+  any_of: ["8080"]

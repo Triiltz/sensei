@@ -1,0 +1,15 @@
+id: disk-hog
+category: multi-step
+prompt: "Something in this folder is taking a lot of disk space. What is it?"
+setup: |
+  mkdir -p src cache/build cache/tmp/worker-3 logs
+  head -c 5000 /dev/urandom > src/main.bin
+  head -c 40000 /dev/urandom > cache/build/out.o
+  head -c 3000000 /dev/urandom > cache/tmp/worker-3/core.dump
+  head -c 20000 /dev/urandom > logs/app.log
+max_steps: 6
+# Solves the task; used by the suite self-test, never shown to the model.
+reference: "find . -type f -size +1M"
+check:
+  type: answer_contains
+  any_of: ["core.dump"]

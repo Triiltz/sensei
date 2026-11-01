@@ -1,0 +1,14 @@
+id: biggest-subdir
+category: single-step
+prompt: "Which subdirectory of ./data uses the most disk space?"
+setup: |
+  mkdir -p data/images data/videos data/docs
+  head -c 400000 /dev/urandom > data/images/raw.bin
+  head -c 120000 /dev/urandom > data/videos/clip.bin
+  head -c 20000 /dev/urandom > data/docs/manual.bin
+max_steps: 4
+# Solves the task; used by the suite self-test, never shown to the model.
+reference: "du -s data/* | sort -n | tail -1"
+check:
+  type: answer_contains
+  any_of: ["images"]
