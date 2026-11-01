@@ -1,0 +1,79 @@
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "list the files"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "parts": [
+        {
+          "text": "Checking."
+        },
+        {
+          "functionCall": {
+            "args": {
+              "command": "ls",
+              "reason": "see the files"
+            },
+            "id": "call_1",
+            "name": "run_command"
+          }
+        }
+      ],
+      "role": "model"
+    },
+    {
+      "parts": [
+        {
+          "functionResponse": {
+            "id": "call_1",
+            "name": "run_command",
+            "response": {
+              "output": "a.txt\nb.txt"
+            }
+          }
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 1024
+  },
+  "systemInstruction": {
+    "parts": [
+      {
+        "text": "You are a test."
+      }
+    ]
+  },
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "description": "Run a shell command.",
+          "name": "run_command",
+          "parameters": {
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "command",
+              "reason"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    }
+  ]
+}

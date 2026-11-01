@@ -1,68 +1,156 @@
 package executor
 
-import "testing"
+import (
+	"bytes"
+	"context"
+	"errors"
+	"io"
+	"strings"
+	"testing"
+)
 
-func TestParseCommand(t *testing.T) {
+// fakeTTY swaps the package seams for the duration of a test and records
+// what was printed and which commands ran.
+type fakeTTY struct {
+	out bytes.Buffer
+	ran []string
+}
+
+func setup(t *testing.T, ttyInput string, ttyErr error) *fakeTTY {
+	t.Helper()
+	f := &fakeTTY{}
+
+	oldStdout, oldTTY, oldShell := stdout, openTTY, runShell
+	t.Cleanup(func() { stdout, openTTY, runShell = oldStdout, oldTTY, oldShell })
+
+	stdout = &f.out
+	openTTY = func() (io.ReadCloser, error) {
+		if ttyErr != nil {
+			return nil, ttyErr
+		}
+		return io.NopCloser(strings.NewReader(ttyInput)), nil
+	}
+	runShell = func(_ context.Context, command string) error {
+		f.ran = append(f.ran, command)
+		return nil
+	}
+	return f
+}
+
+func TestRun(t *testing.T) {
 	tests := []struct {
-		name        string
-		response    string
-		wantText    string
-		wantCommand string
+		name       string
+		text       string
+		cmds       []Command
+		force      bool
+		ttyInput   string
+		ttyErr     error
+		wantRan    []string
+		wantOutput []string
 	}{
 		{
-			name:        "conceptual answer without a command",
-			response:    "A pipe connects the stdout of one process to the stdin of another.",
-			wantText:    "A pipe connects the stdout of one process to the stdin of another.",
-			wantCommand: "",
+			name:       "conceptual answer without a command",
+			text:       "A pipe connects the stdout of one process to the stdin of another.",
+			wantOutput: []string{"A pipe connects"},
 		},
 		{
-			name:        "single command is extracted",
-			response:    "Extracts a tar.gz archive.\nCOMMAND=tar -xzf archive.tar.gz",
-			wantText:    "Extracts a tar.gz archive.",
-			wantCommand: "tar -xzf archive.tar.gz",
+			name:       "confirmed command runs",
+			text:       "Extracts a tar.gz archive.",
+			cmds:       []Command{{Command: "tar -xzf archive.tar.gz"}},
+			ttyInput:   "y\n",
+			wantRan:    []string{"tar -xzf archive.tar.gz"},
+			wantOutput: []string{"Extracts a tar.gz archive.", "Suggested command: tar -xzf archive.tar.gz", "Run it? [y/N]"},
 		},
 		{
-			name:        "multiple commands are shown as text, never executed",
-			response:    "Do both:\nCOMMAND=git add .\nCOMMAND=git commit -m wip",
-			wantText:    "Do both:\n  $ git add .\n  $ git commit -m wip",
-			wantCommand: "",
+			name:       "anything but yes aborts",
+			cmds:       []Command{{Command: "ls -la"}},
+			ttyInput:   "\n",
+			wantOutput: []string{"Aborted."},
 		},
 		{
-			name:        "placeholder blocks extraction",
-			response:    "Creates a branch.\nCOMMAND=git checkout -b <branch-name>",
-			wantText:    "Creates a branch.\n  $ git checkout -b <branch-name>",
-			wantCommand: "",
+			name:       "force skips the prompt",
+			cmds:       []Command{{Command: "ls -la"}},
+			force:      true,
+			wantRan:    []string{"ls -la"},
+			wantOutput: []string{"Suggested command: ls -la"},
 		},
 		{
-			name:        "shell redirection is not a placeholder",
-			response:    "Sorts the file.\nCOMMAND=sort < input.txt > output.txt",
-			wantText:    "Sorts the file.",
-			wantCommand: "sort < input.txt > output.txt",
+			name:       "no terminal means no run",
+			cmds:       []Command{{Command: "ls -la"}},
+			ttyErr:     errors.New("no tty"),
+			wantOutput: []string{"no terminal to confirm"},
 		},
 		{
-			name:        "heredoc-style redirection is not a placeholder",
-			response:    "Appends a line.\nCOMMAND=cat >> notes.txt < header.txt",
-			wantText:    "Appends a line.",
-			wantCommand: "cat >> notes.txt < header.txt",
+			name:       "reason is shown when the model wrote no text",
+			cmds:       []Command{{Command: "ls -la", Reason: "Lists the files."}},
+			ttyInput:   "n\n",
+			wantOutput: []string{"Lists the files."},
 		},
 		{
-			name:        "indented command line is still recognised",
-			response:    "Lists files.\n   COMMAND=ls -la",
-			wantText:    "Lists files.",
-			wantCommand: "ls -la",
+			name:       "multiple commands are shown as text, never executed",
+			text:       "Do both:",
+			cmds:       []Command{{Command: "git add ."}, {Command: "git commit -m wip"}},
+			force:      true,
+			wantOutput: []string{"Do both:\n  $ git add .\n  $ git commit -m wip"},
+		},
+		{
+			name:       "placeholder blocks execution",
+			text:       "Creates a branch.",
+			cmds:       []Command{{Command: "git checkout -b <branch-name>"}},
+			force:      true,
+			wantOutput: []string{"  $ git checkout -b <branch-name>"},
+		},
+		{
+			name:    "shell redirection is not a placeholder",
+			cmds:    []Command{{Command: "sort < input.txt > output.txt"}},
+			force:   true,
+			wantRan: []string{"sort < input.txt > output.txt"},
+		},
+		{
+			name:    "heredoc-style redirection is not a placeholder",
+			cmds:    []Command{{Command: "cat >> notes.txt < header.txt"}},
+			force:   true,
+			wantRan: []string{"cat >> notes.txt < header.txt"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			text, command := ParseCommand(tt.response)
-			if text != tt.wantText {
-				t.Errorf("text:\ngot  %q\nwant %q", text, tt.wantText)
+			f := setup(t, tt.ttyInput, tt.ttyErr)
+
+			if err := Run(context.Background(), tt.text, tt.cmds, tt.force); err != nil {
+				t.Fatalf("unexpected error: %v", err)
 			}
-			if command != tt.wantCommand {
-				t.Errorf("command:\ngot  %q\nwant %q", command, tt.wantCommand)
+
+			if strings.Join(f.ran, "|") != strings.Join(tt.wantRan, "|") {
+				t.Errorf("ran %q, want %q", f.ran, tt.wantRan)
+			}
+			for _, want := range tt.wantOutput {
+				if !strings.Contains(f.out.String(), want) {
+					t.Errorf("output does not contain %q:\n%s", want, f.out.String())
+				}
 			}
 		})
+	}
+}
+
+func TestConfirmIsCancelledByContext(t *testing.T) {
+	f := setup(t, "", nil)
+	// A reader that never returns, like a user who never answers.
+	openTTY = func() (io.ReadCloser, error) {
+		r, _ := io.Pipe()
+		return r, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := Run(ctx, "", []Command{{Command: "ls"}}, false)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if len(f.ran) != 0 {
+		t.Errorf("command ran after cancellation: %q", f.ran)
 	}
 }
 

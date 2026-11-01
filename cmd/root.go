@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,9 +15,10 @@ import (
 
 	"github.com/briandowns/spinner"
 	"github.com/spf13/cobra"
-	"github.com/triiltz/sensei/internal/ai"
+	"github.com/triiltz/sensei/internal/agent"
 	"github.com/triiltz/sensei/internal/config"
 	"github.com/triiltz/sensei/internal/executor"
+	"github.com/triiltz/sensei/internal/llm"
 )
 
 var (
@@ -52,8 +55,18 @@ func init() {
 }
 
 // Execute is called by main.go to start the CLI.
+//
+// Ctrl+C cancels the context, which aborts the in-flight request, the
+// confirmation prompt or the running command, and exits with status 130.
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	err := rootCmd.ExecuteContext(ctx)
+	stop()
+
+	if errors.Is(err, context.Canceled) {
+		os.Exit(130)
+	}
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
@@ -74,8 +87,8 @@ func run(cmd *cobra.Command, args []string) error {
 	// Read piped content if available.
 	pipeContent := readPipe()
 
-	// Piped content is untrusted: it could steer the model into emitting a
-	// COMMAND= line, which -f would then run without any confirmation.
+	// Piped content is untrusted: it could steer the model into suggesting a
+	// command, which -f would then run without any confirmation.
 	if pipeContent != "" && forceFlag {
 		return fmt.Errorf("-f cannot be used with piped input.\n\n" +
 			"Piped content is untrusted and could make the model suggest an unintended command.\n" +
@@ -100,26 +113,39 @@ func run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Call the AI.
-	client := ai.NewClient(cfg)
+	provider, err := llm.New(cfg)
+	if err != nil {
+		return err
+	}
+
+	ctx := cmd.Context()
 
 	stopSpinner := startSpinner()
-	response, err := client.Ask(userPrompt, pipeContent)
+	answer, err := agent.Ask(ctx, provider, userPrompt, pipeContent, warnf)
 	stopSpinner()
 
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return fmt.Errorf("AI request failed: %w", err)
 	}
 
-	// Parse the response and optionally execute the command.
-	return executor.Run(response, forceFlag)
+	// Print the answer and optionally run the suggested command.
+	return executor.Run(ctx, answer.Text, answer.Commands, forceFlag)
+}
+
+// warnf reports non-fatal notices (such as input truncation) on stderr.
+func warnf(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
 }
 
 // startSpinner shows a "Thinking..." spinner and returns a function that stops it.
 //
 // The spinner writes to stderr so that redirecting or piping stdout yields the
 // response alone, and it is skipped entirely when stderr is not a terminal.
-// A signal handler restores the cursor on Ctrl+C, which the spinner hides.
+// Ctrl+C cancels the request, so the caller always reaches stop, which
+// restores the cursor the spinner hides.
 func startSpinner() (stop func()) {
 	if !isTerminal(os.Stderr) {
 		return func() {}
@@ -132,29 +158,7 @@ func startSpinner() (stop func()) {
 	s.Suffix = " Thinking..."
 	s.Start()
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-sigCh:
-			s.Stop()
-			os.Exit(130)
-		case <-done:
-		}
-	}()
-
-	var once bool
-	return func() {
-		if once {
-			return
-		}
-		once = true
-		signal.Stop(sigCh)
-		close(done)
-		s.Stop()
-	}
+	return s.Stop
 }
 
 // isTerminal reports whether the given file is attached to a terminal.

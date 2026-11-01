@@ -5,61 +5,179 @@ import (
 	"testing"
 )
 
+var allVars = []string{
+	"SENSEI_API_KEY", "SENSEI_PROVIDER", "SENSEI_MODEL",
+	"GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+}
+
 func TestLoad(t *testing.T) {
 	tests := []struct {
 		name         string
-		apiKey       string
-		provider     string
-		model        string
+		env          map[string]string
 		wantErr      string
 		wantProvider Provider
+		wantKey      string
+		wantKeyVar   string
 		wantModel    string
 	}{
 		{
-			name:    "missing api key is an error",
-			wantErr: "API key not found",
+			name:    "no key at all points at the free Gemini setup",
+			env:     map[string]string{},
+			wantErr: "aistudio.google.com",
 		},
+
+		// Rule 1: SENSEI_PROVIDER.
 		{
-			name:         "defaults to openai",
-			apiKey:       "sk-test",
-			wantProvider: ProviderOpenAI,
-			wantModel:    "gpt-4o-mini",
-		},
-		{
-			name:         "gemini provider gets its own default model",
-			apiKey:       "test",
-			provider:     "gemini",
+			name:         "explicit provider with a matching key",
+			env:          map[string]string{"SENSEI_PROVIDER": "gemini", "SENSEI_API_KEY": "AIza-test"},
 			wantProvider: ProviderGemini,
+			wantKey:      "AIza-test",
+			wantKeyVar:   "SENSEI_API_KEY",
+			wantModel:    "gemini-2.5-flash",
+		},
+		{
+			name:         "explicit provider trusts a key with an unknown prefix",
+			env:          map[string]string{"SENSEI_PROVIDER": "gemini", "SENSEI_API_KEY": "custom-key"},
+			wantProvider: ProviderGemini,
+			wantKey:      "custom-key",
+			wantKeyVar:   "SENSEI_API_KEY",
 			wantModel:    "gemini-2.5-flash",
 		},
 		{
 			name:         "provider is case-insensitive",
-			apiKey:       "test",
-			provider:     "GEMINI",
+			env:          map[string]string{"SENSEI_PROVIDER": "ANTHROPIC", "SENSEI_API_KEY": "sk-ant-test"},
+			wantProvider: ProviderAnthropic,
+			wantKey:      "sk-ant-test",
+			wantKeyVar:   "SENSEI_API_KEY",
+			wantModel:    "claude-haiku-5-5",
+		},
+		{
+			name: "explicit provider falls back to its own key when SENSEI_API_KEY belongs elsewhere",
+			env: map[string]string{
+				"SENSEI_PROVIDER":   "anthropic",
+				"SENSEI_API_KEY":    "AIza-gemini",
+				"ANTHROPIC_API_KEY": "sk-ant-test",
+			},
+			wantProvider: ProviderAnthropic,
+			wantKey:      "sk-ant-test",
+			wantKeyVar:   "ANTHROPIC_API_KEY",
+			wantModel:    "claude-haiku-5-5",
+		},
+		{
+			name:         "explicit provider with only its per-provider key",
+			env:          map[string]string{"SENSEI_PROVIDER": "openai", "OPENAI_API_KEY": "sk-test"},
+			wantProvider: ProviderOpenAI,
+			wantKey:      "sk-test",
+			wantKeyVar:   "OPENAI_API_KEY",
+			wantModel:    "gpt-6-luna",
+		},
+		{
+			name:    "explicit provider with a mismatched key and no fallback",
+			env:     map[string]string{"SENSEI_PROVIDER": "openai", "SENSEI_API_KEY": "AIza-gemini"},
+			wantErr: "OPENAI_API_KEY",
+		},
+		{
+			name:    "explicit provider with no key",
+			env:     map[string]string{"SENSEI_PROVIDER": "gemini"},
+			wantErr: "no API key found for gemini",
+		},
+		{
+			name:    "unknown provider is rejected",
+			env:     map[string]string{"SENSEI_PROVIDER": "mistral", "SENSEI_API_KEY": "x"},
+			wantErr: "unsupported provider",
+		},
+
+		// Rule 2: SENSEI_API_KEY prefix.
+		{
+			name:         "existing OpenAI users keep working with no config changes",
+			env:          map[string]string{"SENSEI_API_KEY": "sk-proj-test"},
+			wantProvider: ProviderOpenAI,
+			wantKey:      "sk-proj-test",
+			wantKeyVar:   "SENSEI_API_KEY",
+			wantModel:    "gpt-6-luna",
+		},
+		{
+			name:         "an AI Studio key alone selects gemini",
+			env:          map[string]string{"SENSEI_API_KEY": "AIzaSyTest"},
 			wantProvider: ProviderGemini,
+			wantKey:      "AIzaSyTest",
+			wantKeyVar:   "SENSEI_API_KEY",
 			wantModel:    "gemini-2.5-flash",
 		},
 		{
-			name:     "unknown provider is rejected",
-			apiKey:   "test",
-			provider: "anthropic",
-			wantErr:  "unsupported provider",
+			name:         "sk-ant- is anthropic, not openai",
+			env:          map[string]string{"SENSEI_API_KEY": "sk-ant-api03-test"},
+			wantProvider: ProviderAnthropic,
+			wantKey:      "sk-ant-api03-test",
+			wantKeyVar:   "SENSEI_API_KEY",
+			wantModel:    "claude-haiku-5-5",
 		},
 		{
-			name:         "SENSEI_MODEL overrides the default",
-			apiKey:       "sk-test",
-			provider:     "openai",
-			model:        "gpt-4o",
+			name:    "unknown prefix without SENSEI_PROVIDER is not guessed",
+			env:     map[string]string{"SENSEI_API_KEY": "mystery-key"},
+			wantErr: "SENSEI_PROVIDER",
+		},
+		{
+			name: "SENSEI_API_KEY takes precedence over per-provider keys",
+			env: map[string]string{
+				"SENSEI_API_KEY": "sk-test",
+				"GEMINI_API_KEY": "AIza-test",
+			},
 			wantProvider: ProviderOpenAI,
-			wantModel:    "gpt-4o",
+			wantKey:      "sk-test",
+			wantKeyVar:   "SENSEI_API_KEY",
+			wantModel:    "gpt-6-luna",
+		},
+
+		// Rule 3: per-provider keys, in order.
+		{
+			name: "gemini key wins over the others",
+			env: map[string]string{
+				"ANTHROPIC_API_KEY": "sk-ant-test",
+				"OPENAI_API_KEY":    "sk-test",
+				"GEMINI_API_KEY":    "AIza-test",
+			},
+			wantProvider: ProviderGemini,
+			wantKey:      "AIza-test",
+			wantKeyVar:   "GEMINI_API_KEY",
+			wantModel:    "gemini-2.5-flash",
+		},
+		{
+			name: "openai key wins over anthropic",
+			env: map[string]string{
+				"ANTHROPIC_API_KEY": "sk-ant-test",
+				"OPENAI_API_KEY":    "sk-test",
+			},
+			wantProvider: ProviderOpenAI,
+			wantKey:      "sk-test",
+			wantKeyVar:   "OPENAI_API_KEY",
+			wantModel:    "gpt-6-luna",
+		},
+		{
+			name:         "anthropic key alone",
+			env:          map[string]string{"ANTHROPIC_API_KEY": "sk-ant-test"},
+			wantProvider: ProviderAnthropic,
+			wantKey:      "sk-ant-test",
+			wantKeyVar:   "ANTHROPIC_API_KEY",
+			wantModel:    "claude-haiku-5-5",
+		},
+
+		// Model override.
+		{
+			name:         "SENSEI_MODEL overrides the default",
+			env:          map[string]string{"SENSEI_API_KEY": "sk-test", "SENSEI_MODEL": "gpt-6-astra"},
+			wantProvider: ProviderOpenAI,
+			wantKey:      "sk-test",
+			wantKeyVar:   "SENSEI_API_KEY",
+			wantModel:    "gpt-6-astra",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("SENSEI_API_KEY", tt.apiKey)
-			t.Setenv("SENSEI_PROVIDER", tt.provider)
-			t.Setenv("SENSEI_MODEL", tt.model)
+			for _, v := range allVars {
+				t.Setenv(v, tt.env[v])
+			}
 
 			cfg, err := Load()
 
@@ -76,11 +194,14 @@ func TestLoad(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if cfg.APIKey != tt.apiKey {
-				t.Errorf("APIKey = %q, want %q", cfg.APIKey, tt.apiKey)
-			}
 			if cfg.Provider != tt.wantProvider {
 				t.Errorf("Provider = %q, want %q", cfg.Provider, tt.wantProvider)
+			}
+			if cfg.APIKey != tt.wantKey {
+				t.Errorf("APIKey = %q, want %q", cfg.APIKey, tt.wantKey)
+			}
+			if cfg.KeyVar != tt.wantKeyVar {
+				t.Errorf("KeyVar = %q, want %q", cfg.KeyVar, tt.wantKeyVar)
 			}
 			if cfg.Model != tt.wantModel {
 				t.Errorf("Model = %q, want %q", cfg.Model, tt.wantModel)

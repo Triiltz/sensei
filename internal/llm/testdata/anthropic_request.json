@@ -1,0 +1,65 @@
+{
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "list the files",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "text": "Checking.",
+          "type": "text"
+        },
+        {
+          "id": "call_1",
+          "input": {
+            "command": "ls",
+            "reason": "see the files"
+          },
+          "name": "run_command",
+          "type": "tool_use"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": [
+        {
+          "content": "a.txt\nb.txt",
+          "tool_use_id": "call_1",
+          "type": "tool_result"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "model": "claude-test",
+  "system": "You are a test.",
+  "tools": [
+    {
+      "description": "Run a shell command.",
+      "input_schema": {
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "command",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "name": "run_command"
+    }
+  ]
+}

@@ -2,7 +2,9 @@ package executor
 
 import (
 	"bufio"
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -21,89 +23,95 @@ var (
 	placeholderRE = regexp.MustCompile(`<[A-Za-z][A-Za-z0-9_-]*>`)
 )
 
-// ParseCommand checks if the AI response contains a COMMAND= line and returns
-// the response text (without the command line) and the extracted command.
-func ParseCommand(response string) (text string, command string) {
-	var textLines []string
-	var commands []string
-	lines := strings.Split(response, "\n")
+// Seams replaced by tests.
+var (
+	stdout io.Writer = os.Stdout
 
-	// First pass: count how many commands there are
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "COMMAND=") {
-			commands = append(commands, strings.TrimPrefix(trimmed, "COMMAND="))
-		}
-	}
+	// openTTY opens the controlling terminal for the confirmation prompt, so
+	// it works even when stdin is redirected or was consumed by a pipe.
+	openTTY = func() (io.ReadCloser, error) { return os.Open("/dev/tty") }
 
-	// Second pass: build the text and extract the command (if only one)
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "COMMAND=") {
-			if len(commands) == 1 && !placeholderRE.MatchString(commands[0]) {
-				command = commands[0] // Extract to execute
-			} else {
-				// If multiple, show them as text and avoid execution
-				cmd := strings.TrimPrefix(trimmed, "COMMAND=")
-				textLines = append(textLines, "  $ "+cmd)
-			}
-		} else {
-			textLines = append(textLines, line)
-		}
-	}
+	runShell = execute
+)
 
-	text = strings.TrimSpace(strings.Join(textLines, "\n"))
-	return text, command
+// Command is a shell command suggested by the model.
+type Command struct {
+	Command string
+	Reason  string
 }
 
-// Run prints the response text, and if a command was detected, prompts for
-// execution (unless force is true).
-func Run(response string, force bool) error {
-	text, command := ParseCommand(response)
+// Run prints the model's answer and, when it suggested exactly one runnable
+// command, asks for confirmation (unless force is true) and runs it.
+//
+// Several commands, or a command with placeholders, are shown but never run:
+// there is no single safe thing to confirm.
+func Run(ctx context.Context, text string, cmds []Command, force bool) error {
 	text = normalizePlainText(text)
-
-	// Always print the explanation text.
+	if text == "" && len(cmds) == 1 {
+		text = cmds[0].Reason
+	}
 	if text != "" {
-		fmt.Println(text)
+		fmt.Fprintln(stdout, text)
 	}
 
-	// No command detected — nothing else to do.
-	if command == "" {
+	if len(cmds) == 0 {
+		return nil
+	}
+	if len(cmds) > 1 || placeholderRE.MatchString(cmds[0].Command) {
+		for _, c := range cmds {
+			fmt.Fprintf(stdout, "  $ %s\n", c.Command)
+		}
 		return nil
 	}
 
-	fmt.Printf("\nSuggested command: %s\n", command)
+	command := cmds[0].Command
+	fmt.Fprintf(stdout, "\nSuggested command: %s\n", command)
 
 	if !force {
-		// stdin may have been consumed by pipe mode, or simply not be a
-		// terminal — either way there is nobody to answer the prompt.
-		if !isTerminal(os.Stdin) {
-			fmt.Println("Not running it: stdin is not a terminal, so the command cannot be confirmed.")
-			return nil
+		ok, err := confirm(ctx)
+		if err != nil {
+			return err
 		}
-
-		fmt.Print("   Run it? [y/N]: ")
-		reader := bufio.NewReader(os.Stdin)
-		answer, _ := reader.ReadString('\n')
-		answer = strings.TrimSpace(strings.ToLower(answer))
-
-		if answer != "y" && answer != "yes" {
-			fmt.Println("Aborted.")
+		if !ok {
 			return nil
 		}
 	}
 
-	fmt.Println()
-	return execute(command)
+	fmt.Fprintln(stdout)
+	return runShell(ctx, command)
 }
 
-// isTerminal reports whether the given file is attached to a terminal.
-func isTerminal(f *os.File) bool {
-	info, err := f.Stat()
+// confirm asks "Run it? [y/N]" on the terminal and reports the answer.
+func confirm(ctx context.Context) (bool, error) {
+	tty, err := openTTY()
 	if err != nil {
-		return false
+		fmt.Fprintln(stdout, "Not running it: there is no terminal to confirm the command on.")
+		return false, nil
 	}
-	return (info.Mode() & os.ModeCharDevice) != 0
+	defer tty.Close()
+
+	fmt.Fprint(stdout, "   Run it? [y/N]: ")
+
+	// Read in the background so Ctrl+C (which cancels ctx) is not stuck
+	// behind a blocking read.
+	answers := make(chan string, 1)
+	go func() {
+		line, _ := bufio.NewReader(tty).ReadString('\n')
+		answers <- line
+	}()
+
+	select {
+	case <-ctx.Done():
+		fmt.Fprintln(stdout)
+		return false, ctx.Err()
+	case answer := <-answers:
+		answer = strings.TrimSpace(strings.ToLower(answer))
+		if answer != "y" && answer != "yes" {
+			fmt.Fprintln(stdout, "Aborted.")
+			return false, nil
+		}
+		return true, nil
+	}
 }
 
 // normalizePlainText removes common Markdown markers so output stays terminal-friendly.
@@ -157,18 +165,21 @@ func normalizePlainText(text string) string {
 }
 
 // execute runs the command through the user's shell and streams output.
-func execute(command string) error {
+func execute(ctx context.Context, command string) error {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
 	}
 
-	cmd := exec.Command(shell, "-c", command)
+	cmd := exec.CommandContext(ctx, shell, "-c", command)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return fmt.Errorf("command failed: %w", err)
 	}
 	return nil
