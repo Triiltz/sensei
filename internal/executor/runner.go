@@ -12,7 +12,13 @@ import (
 var (
 	boldAsteriskRE   = regexp.MustCompile(`\*\*(.*?)\*\*`)
 	boldUnderscoreRE = regexp.MustCompile(`__(.*?)__`)
-	placeholderRE    = regexp.MustCompile(`<[^>]+>`)
+	codeSpanRE       = regexp.MustCompile("`([^`]+)`")
+	headingRE        = regexp.MustCompile(`^#{1,6}\s+`)
+
+	// placeholderRE matches angle-bracket placeholders such as <branch-name>.
+	// It deliberately requires an identifier-like body so that shell
+	// redirections (`sort < in.txt > out.txt`) are not mistaken for one.
+	placeholderRE = regexp.MustCompile(`<[A-Za-z][A-Za-z0-9_-]*>`)
 )
 
 // ParseCommand checks if the AI response contains a COMMAND= line and returns
@@ -69,6 +75,13 @@ func Run(response string, force bool) error {
 	fmt.Printf("\nSuggested command: %s\n", command)
 
 	if !force {
+		// stdin may have been consumed by pipe mode, or simply not be a
+		// terminal — either way there is nobody to answer the prompt.
+		if !isTerminal(os.Stdin) {
+			fmt.Println("Not running it: stdin is not a terminal, so the command cannot be confirmed.")
+			return nil
+		}
+
 		fmt.Print("   Run it? [y/N]: ")
 		reader := bufio.NewReader(os.Stdin)
 		answer, _ := reader.ReadString('\n')
@@ -84,7 +97,20 @@ func Run(response string, force bool) error {
 	return execute(command)
 }
 
+// isTerminal reports whether the given file is attached to a terminal.
+func isTerminal(f *os.File) bool {
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
+}
+
 // normalizePlainText removes common Markdown markers so output stays terminal-friendly.
+//
+// It is deliberately conservative: only real Markdown constructs are stripped,
+// so shebangs, shell comments and backticks used for command substitution
+// survive intact — those show up constantly when analysing piped scripts.
 func normalizePlainText(text string) string {
 	if text == "" {
 		return text
@@ -108,9 +134,9 @@ func normalizePlainText(text string) string {
 		leading := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
 		content := strings.TrimLeft(line, " \t")
 
-		for strings.HasPrefix(content, "#") {
-			content = strings.TrimLeft(strings.TrimPrefix(content, "#"), " ")
-		}
+		// Only "# " through "###### " are headings; a bare "#" starts a shell
+		// comment and "#!" a shebang, both of which must be preserved.
+		content = headingRE.ReplaceAllString(content, "")
 
 		if strings.HasPrefix(content, "* ") || strings.HasPrefix(content, "+ ") {
 			content = "- " + strings.TrimSpace(content[2:])
@@ -118,7 +144,8 @@ func normalizePlainText(text string) string {
 
 		content = boldAsteriskRE.ReplaceAllString(content, "$1")
 		content = boldUnderscoreRE.ReplaceAllString(content, "$1")
-		content = strings.ReplaceAll(content, "`", "")
+		// Unwrap paired code spans only, leaving unmatched backticks alone.
+		content = codeSpanRE.ReplaceAllString(content, "$1")
 
 		lines[i] = leading + content
 	}
